@@ -22,6 +22,7 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   USE ldaU,             ONLY : lda_plus_u, lda_plus_u_kind, ldmx_b, &
                                nsg, v_nsg 
   USE xc_lib,           ONLY : xclib_dft_is
+  USE dft_mod,          ONLY : xclib_get_id
   USE scf,              ONLY : scf_type
   USE cell_base,        ONLY : alat
   USE io_global,        ONLY : stdout
@@ -63,7 +64,9 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   !
   ! ... calculate exchange-correlation potential
   !
-  IF (xclib_dft_is('meta')) then
+  IF (xclib_get_id('LDA', 'EXCH') == -1) then
+     CALL v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
+  ELSEIF (xclib_dft_is('meta')) then
      CALL v_xc_meta( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
   ELSE
      CALL v_xc( rho, rho_core, rhog_core, etxc, vtxc, v%of_r )
@@ -143,6 +146,216 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   RETURN
   !
 END SUBROUTINE v_of_rho
+!
+!
+!----------------------------------------------------------------------------
+SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
+  !--------------------------------------------------------------------------
+  !! Non-local XC potential using CIDER descriptors
+  !
+  USE kinds,            ONLY : DP
+  USE constants,        ONLY : e2, eps8
+  USE io_global,        ONLY : stdout
+  USE fft_base,         ONLY : dfftp
+  USE gvect,            ONLY : g, ngm
+  USE lsda_mod,         ONLY : nspin
+  USE cell_base,        ONLY : omega
+  USE funct,            ONLY : dft_is_nonlocc, nlc
+  USE scf,              ONLY : scf_type, rhoz_or_updw
+  USE mp,               ONLY : mp_sum
+  USE mp_bands,         ONLY : intra_bgrp_comm
+  !
+  IMPLICIT NONE
+  !
+  TYPE (scf_type), INTENT(INOUT) :: rho
+  !! the valence charge
+  REAL(DP), INTENT(IN) :: rho_core(dfftp%nnr)
+  !! the core charge in real space
+  COMPLEX(DP), INTENT(IN) :: rhog_core(ngm)
+  !! the core charge in reciprocal space
+  REAL(DP), INTENT(INOUT) :: v(dfftp%nnr,nspin)
+  !! V_xc potential
+  REAL(DP), INTENT(INOUT) :: kedtaur(dfftp%nnr,nspin)
+  !! local K energy density                     
+  REAL(DP), INTENT(INOUT) :: vtxc
+  !! integral V_xc * rho
+  REAL(DP), INTENT(INOUT) :: etxc
+  !! E_xc energy
+  !
+  ! ... local variables
+  !
+  REAL(DP) :: zeta, rh, sgn(2)
+  INTEGER  :: k, ipol, is, np
+  !
+  REAL(DP), ALLOCATABLE :: ex(:), ec(:)
+  REAL(DP), ALLOCATABLE :: v1x(:,:), v2x(:,:), v3x(:,:)
+  REAL(DP), ALLOCATABLE :: v1c(:,:), v2c(:,:,:), v3c(:,:)
+  REAL(DP), ALLOCATABLE :: feat(:,:,:)
+  REAL(DP), ALLOCATABLE :: vfeat(:,:,:)
+  !
+  REAL(DP) :: fac
+       
+  REAL(DP), DIMENSION(2) :: grho2, rhoneg
+  REAL(DP), DIMENSION(3) :: grhoup, grhodw
+  !
+  REAL(DP), ALLOCATABLE :: grho(:,:,:), h(:,:,:), dh(:)
+  REAL(DP), ALLOCATABLE :: rhoout(:)
+  COMPLEX(DP), ALLOCATABLE :: rhogsum(:)
+  REAL(DP), PARAMETER :: eps12 = 1.0d-12, zero=0._dp
+  !
+  CALL start_clock( 'v_xc_cider' )
+  !
+  etxc = zero
+  vtxc = zero
+  v(:,:) = zero
+  rhoneg(:) = zero
+  sgn(1) = 1._dp  ;   sgn(2) = -1._dp
+  fac = 1.D0 / DBLE( nspin )
+  np = 1
+  IF (nspin==2) np=3
+  !
+  ALLOCATE( grho(3,dfftp%nnr,nspin) )
+  ALLOCATE( h(3,dfftp%nnr,nspin) )
+  ALLOCATE( rhogsum(ngm) )
+  !
+  ALLOCATE( ex(dfftp%nnr), ec(dfftp%nnr) )
+  ALLOCATE( v1x(dfftp%nnr,nspin), v2x(dfftp%nnr,nspin)   , v3x(dfftp%nnr,nspin) )
+  ALLOCATE( v1c(dfftp%nnr,nspin), v2c(np,dfftp%nnr,nspin), v3c(dfftp%nnr,nspin) )
+  ALLOCATE( feat(dfftp%nnr,nspin,1) ) ! TODO change 1 to nfeat
+  ALLOCATE( vfeat(dfftp%nnr,nspin,1) ) ! TODO change 1 to nfeat
+  !
+  ! ... calculate the gradient of rho + rho_core in real space
+  ! ... in LSDA case rhogsum is in (up,down) format
+  !
+  DO is = 1, nspin
+     !
+     rhogsum(:) = fac*rhog_core(:) + ( rho%of_g(:,1) + sgn(is)*rho%of_g(:,nspin) )*0.5D0
+     !
+     CALL fft_gradient_g2r( dfftp, rhogsum, g, grho(1,1,is) )
+     !
+  ENDDO
+  DEALLOCATE(rhogsum)
+  !
+  !
+  IF (nspin == 1) THEN
+    !
+    CALL cider_feat( rho%of_g(:,1), feat(:,1,1))
+    !
+    CALL xc_metagcx( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
+                      v1x, v2x, v3x, v1c, v2c, v3c )
+    CALL xc_cider_x( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
+                      v1x, v2x, v3x, vfeat)
+    !
+    CALL cider_lpot (vfeat(:,1,1), v1x(:,1))
+    !
+    DO k = 1, dfftp%nnr
+       !
+       v(k,1) = (v1x(k,1)+v1c(k,1)) * e2
+       !
+       ! h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
+       h(:,k,1) = (v2x(k,1)+v2c(1,k,1)) * grho(:,k,1) * e2 
+       !
+       kedtaur(k,1) = (v3x(k,1)+v3c(k,1)) * 0.5d0 * e2
+       !
+       etxc = etxc + (ex(k)+ec(k)) * e2
+       vtxc = vtxc + (v1x(k,1)+v1c(k,1)) * e2 * ABS(rho%of_r(k,1))
+       !
+       IF (rho%of_r(k,1) < zero) rhoneg(1) = rhoneg(1)-rho%of_r(k,1)
+       !
+    ENDDO
+    !
+  ELSE
+    !
+    CALL rhoz_or_updw( rho, 'both', '->updw' )
+    CALL cider_feat ( rho%of_g(:,1), feat(:,1,1) )
+    CALL cider_feat ( rho%of_g(:,2), feat(:,2,1) )
+    !
+    CALL xc_metagcx( dfftp%nnr, 2, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
+                     v1x, v2x, v3x, v1c, v2c, v3c )
+    CALL xc_cider_x( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
+                      v1x, v2x, v3x, vfeat)
+    !
+    CALL cider_lpot (vfeat(:,1,1), v1x(:,1))
+    CALL cider_lpot (vfeat(:,2,1), v1x(:,2))
+    !
+    ! first term of the gradient correction : D(rho*Exc)/D(rho)
+    !
+    DO k = 1, dfftp%nnr
+       !
+       v(k,1) = (v1x(k,1) + v1c(k,1)) * e2
+       v(k,2) = (v1x(k,2) + v1c(k,2)) * e2
+       !
+       ! h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
+       !
+       h(:,k,1) = (v2x(k,1) * grho(:,k,1) + v2c(:,k,1)) * e2
+       h(:,k,2) = (v2x(k,2) * grho(:,k,2) + v2c(:,k,2)) * e2
+       !
+       kedtaur(k,1) = (v3x(k,1) + v3c(k,1)) * 0.5d0 * e2
+       kedtaur(k,2) = (v3x(k,2) + v3c(k,2)) * 0.5d0 * e2
+       !
+       etxc = etxc + (ex(k)+ec(k)) * e2
+       vtxc = vtxc + (v1x(k,1)+v1c(k,1)) * ABS(rho%of_r(k,1)) * e2
+       vtxc = vtxc + (v1x(k,2)+v1c(k,2)) * ABS(rho%of_r(k,2)) * e2
+       !
+       IF ( rho%of_r(k,1) < 0.d0 ) rhoneg(1) = rhoneg(1) - rho%of_r(k,1)
+       IF ( rho%of_r(k,2) < 0.d0 ) rhoneg(2) = rhoneg(2) - rho%of_r(k,2)
+       !
+    ENDDO
+    !
+    CALL rhoz_or_updw( rho, 'both', '->rhoz' )
+    !
+  ENDIF
+  !
+  DEALLOCATE( ex, ec )
+  DEALLOCATE( v1x, v2x, v3x )
+  DEALLOCATE( v1c, v2c, v3c )
+  !
+  !
+  ALLOCATE( dh( dfftp%nnr ) )    
+  !
+  ! ... second term of the gradient correction :
+  ! ... \sum_alpha (D / D r_alpha) ( D(rho*Exc)/D(grad_alpha rho) )
+  !
+  ALLOCATE (rhoout(dfftp%nnr))
+  DO is = 1, nspin
+     !
+     CALL fft_graddot( dfftp, h(1,1,is), g, dh )
+     !
+     v(:,is) = v(:,is) - dh(:)
+     !
+     ! ... rhoout is in (up,down) format 
+     !
+     rhoout(:) = ( rho%of_r(:,1) + sgn(is)*rho%of_r(:,nspin) )*0.5D0
+     vtxc = vtxc - SUM( dh(:) * rhoout(:) )
+     !
+  END DO
+  DEALLOCATE(rhoout)
+  DEALLOCATE(dh)
+  !
+  CALL mp_sum( rhoneg, intra_bgrp_comm )
+  !
+  rhoneg(:) = rhoneg(:) * omega / ( dfftp%nr1*dfftp%nr2*dfftp%nr3 )
+  !
+  IF ((rhoneg(1) > eps8) .OR. (rhoneg(2) > eps8)) THEN
+    write (stdout, '(/,5x, "negative rho (up,down): ", 2es10.3)') rhoneg(:)
+  ENDIF
+  !
+  vtxc = omega * vtxc / ( dfftp%nr1*dfftp%nr2*dfftp%nr3 ) 
+  etxc = omega * etxc / ( dfftp%nr1*dfftp%nr2*dfftp%nr3 )
+  !
+  IF ( dft_is_nonlocc() ) CALL nlc( rho%of_r, rho_core, nspin, etxc, vtxc, v )
+  !
+  CALL mp_sum(  vtxc , intra_bgrp_comm )
+  CALL mp_sum(  etxc , intra_bgrp_comm )
+  !
+  DEALLOCATE(grho)
+  DEALLOCATE(h)
+  !
+  CALL stop_clock( 'v_xc_meta' )
+  !
+  RETURN
+  !
+END SUBROUTINE v_xc_cider
 !
 !
 !----------------------------------------------------------------------------
@@ -1392,6 +1605,7 @@ SUBROUTINE v_h_of_rho_r( rhor, ehart, charge, v )
   RETURN
   !
 END SUBROUTINE v_h_of_rho_r
+!
 !----------------------------------------------------------------------------
 SUBROUTINE gradv_h_of_rho_r( rho, gradv )
   !----------------------------------------------------------------------------
@@ -1485,3 +1699,174 @@ SUBROUTINE gradv_h_of_rho_r( rho, gradv )
   RETURN
   !
 END SUBROUTINE gradv_h_of_rho_r
+!
+!----------------------------------------------------------------------------
+SUBROUTINE cider_feat( rhog, feat )
+  !----------------------------------------------------------------------------
+  !! Hartree potential VH(r) from n(G)
+  !
+  USE constants,         ONLY : fpi, e2
+  USE kinds,             ONLY : DP
+  USE fft_base,          ONLY : dfftp
+  USE fft_interfaces,    ONLY : invfft
+  USE gvect,             ONLY : ngm, gg
+  USE lsda_mod,          ONLY : nspin
+  USE cell_base,         ONLY : omega, tpiba2
+  USE control_flags,     ONLY : gamma_only
+  USE mp_bands,          ONLY : intra_bgrp_comm
+  USE mp,                ONLY : mp_sum
+  !
+  IMPLICIT NONE
+  !
+  COMPLEX(DP), INTENT(IN) :: rhog(ngm)
+  !! the charge density in reciprocal space
+  REAL(DP), INTENT(INOUT) :: feat(dfftp%nnr)
+  !
+  !  ... local variables
+  !
+  REAL(DP)              :: fac
+  REAL(DP), ALLOCATABLE :: aux1(:,:)
+  REAL(DP)              :: rgtot_re, rgtot_im, eh_corr
+  INTEGER               :: is, ig
+  COMPLEX(DP), ALLOCATABLE :: aux(:), rgtot(:), vaux(:)
+  INTEGER               :: nt
+  REAL(DP)              :: aexp
+  !
+  CALL start_clock( 'feat_cider' )
+  !
+  ALLOCATE( aux( dfftp%nnr ), aux1( 2, ngm ) )
+  !
+  ! ... calculate hartree potential in G-space (NB: V(G=0)=0 )
+  !
+  aux1(:,:) = 0.D0
+  aexp = 0.2
+  !
+!$omp parallel do private( fac, rgtot_re, rgtot_im ), reduction(+:ehart)
+  DO ig = 1, ngm
+     !
+     fac = EXP(-gg(ig) / (4.D0 * aexp))
+     !
+     rgtot_re = REAL(  rhog(ig) )
+     rgtot_im = AIMAG( rhog(ig) )
+     !
+     aux1(1,ig) = rgtot_re * fac
+     aux1(2,ig) = rgtot_im * fac
+     !
+  ENDDO
+!$omp end parallel do
+  ! 
+  aux(:) = 0.D0
+  !
+  aux(dfftp%nl(1:ngm)) = CMPLX( aux1(1,1:ngm), aux1(2,1:ngm), KIND=dp )
+  !
+  IF ( gamma_only ) THEN
+     !
+     aux(dfftp%nlm(1:ngm)) = CMPLX( aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+     !
+  END IF
+  !
+  ! ... transform hartree potential to real space
+  !
+  CALL invfft('Rho', aux, dfftp)
+  !
+  ! ... add hartree potential to the xc potential
+  !
+  feat = DBLE(aux(:))
+  !
+  DEALLOCATE( aux, aux1 )
+  !
+  CALL stop_clock( 'feat_cider' )
+  !
+  RETURN
+  !
+END SUBROUTINE cider_feat
+!
+SUBROUTINE cider_lpot( vr, v )
+  !----------------------------------------------------------------------------
+  !! Hartree potential VH(r) from n(G)
+  !
+  USE constants,         ONLY : fpi, e2
+  USE kinds,             ONLY : DP
+  USE fft_base,          ONLY : dfftp
+  USE fft_interfaces,    ONLY : invfft, fwfft
+  USE gvect,             ONLY : ngm, gg, gstart
+  USE lsda_mod,          ONLY : nspin
+  USE cell_base,         ONLY : omega, tpiba2
+  USE control_flags,     ONLY : gamma_only
+  USE mp_bands,          ONLY : intra_bgrp_comm
+  USE mp,                ONLY : mp_sum
+  !
+  IMPLICIT NONE
+  !
+  REAL(DP), INTENT(IN) :: vr(dfftp%nnr)
+  !! the charge density in reciprocal space
+  REAL(DP), INTENT(INOUT) :: v(dfftp%nnr)
+  !
+  !  ... local variables
+  !
+  REAL(DP)              :: fac
+  REAL(DP), ALLOCATABLE :: aux1(:,:)
+  COMPLEX(DP), ALLOCATABLE :: vg(:)
+  REAL(DP)              :: rgtot_re, rgtot_im, eh_corr
+  INTEGER               :: ig
+  COMPLEX(DP), ALLOCATABLE :: aux(:), rgtot(:), vaux(:)
+  INTEGER               :: nt
+  REAL(DP)              :: aexp
+  !
+  CALL start_clock( 'cider_lpot' )
+  !
+  ALLOCATE(vg(dfftp%nnr))
+  vg = vr
+  !
+  ! ... Transform the real-space de/dfeat(r) to de/dfeat(k)
+  !
+  vg = CMPLX(vr,0.D0,kind=dp)
+  CALL fwfft ('Rho', vg, dfftp)
+  !
+  ALLOCATE( aux( dfftp%nnr ), aux1( 2, ngm ) )
+  !
+  ! ... Convolve potential in reciprocal space by multiplying by
+  !     the feature kernel, converting de/dfeat(k) to de/drho(k).
+  !
+  aux1(:,:) = 0.D0
+  aexp = 0.2
+  !
+!$omp parallel do private( fac, rgtot_re, rgtot_im ), reduction(+:ehart)
+  DO ig = 1, ngm
+     !
+     fac = EXP(-gg(ig) / (4.D0 * aexp))
+     !
+     rgtot_re = REAL(  vg(ig) )
+     rgtot_im = AIMAG( vg(ig) )
+     !
+     aux1(1,ig) = rgtot_re * fac
+     aux1(2,ig) = rgtot_im * fac
+     !
+  ENDDO
+!$omp end parallel do
+  ! 
+  aux(:) = 0.D0
+  !
+  aux(dfftp%nl(1:ngm)) = CMPLX( aux1(1,1:ngm), aux1(2,1:ngm), KIND=dp )
+  !
+  IF ( gamma_only ) THEN
+     !
+     aux(dfftp%nlm(1:ngm)) = CMPLX( aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+     !
+  END IF
+  !
+  ! ... transform CIDER xc potential to real space
+  !
+  CALL invfft('Rho', aux, dfftp)
+  !
+  ! ... add contribution to CIDER potential
+  !
+  v = v + DBLE(aux(:))
+  !
+  DEALLOCATE( aux, aux1 )
+  !
+  CALL stop_clock( 'cider_lpot' )
+  !
+  RETURN
+  !
+END SUBROUTINE cider_lpot

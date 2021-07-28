@@ -25,6 +25,7 @@ xc_wrapper_d_lda_lsda.o \
 xc_wrapper_gga.o \
 xc_wrapper_lda_lsda.o \
 xc_wrapper_mgga.o \
+xc_wrapper_cider.o \
 xc_lib.o
 
 BEEF = \

@@ -514,13 +514,19 @@ CONTAINS
     !
     ! check for unrecognized labels
     !
-    IF ( iexch<=0 .AND. icorr<=0 .AND. igcx<=0 .AND. igcc<=0 .AND. imeta<=0 ) THEN
-       IF ( inlc <= 0 .AND. TRIM(dftout) /= 'NOX-NOC') THEN
-          CALL errore( 'set_dft_from_name', TRIM(dftout)//': unrecognized dft', 1 )
-       ELSE
-          ! if inlc is the only nonzero index the label is likely wrong
-          CALL errore( 'set_dft_from_name', TRIM(dftout)//': strange dft, please check', inlc )
-       ENDIF
+    IF ( iexch==-1 .AND. icorr==-1) THEN
+      IF (imeta==0) THEN
+        CALL errore( 'set_dft_from_name', TRIM(dftout)//': unrecognized dft', 1 )
+      ENDIF
+    ELSE
+      IF ( iexch<=0 .AND. icorr<=0 .AND. igcx<=0 .AND. igcc<=0 .AND. imeta<=0 ) THEN
+         IF ( inlc <= 0 .AND. TRIM(dftout) /= 'NOX-NOC') THEN
+            CALL errore( 'set_dft_from_name', TRIM(dftout)//': unrecognized dft', 1 )
+         ELSE
+            ! if inlc is the only nonzero index the label is likely wrong
+            CALL errore( 'set_dft_from_name', TRIM(dftout)//': strange dft, please check', inlc )
+         ENDIF
+      ENDIF
     ENDIF
     !
     ! Fill variables and exit

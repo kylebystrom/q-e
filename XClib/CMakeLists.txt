@@ -21,7 +21,8 @@ set(sources_xclib
     xc_wrapper_d_lda_lsda.f90
     xc_wrapper_gga.f90
     xc_wrapper_lda_lsda.f90
-    xc_wrapper_mgga.f90)
+    xc_wrapper_mgga.f90
+    xc_wrapper_cider.f90)
 
 qe_add_library(qe_xclib ${sources_xclib})
 target_link_libraries(qe_xclib
