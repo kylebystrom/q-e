@@ -234,19 +234,20 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
      CALL fft_gradient_g2r( dfftp, rhogsum, g, grho(1,1,is) )
      !
   ENDDO
-  DEALLOCATE(rhogsum)
+  
   !
   !
   IF (nspin == 1) THEN
     !
-    CALL cider_feat( rho%of_g(:,1), feat(:,1,1))
-    
+    !CALL cider_feat( rho%of_g(:,1), feat(:,1,1))
+    CALL cider_feat( rhogsum, feat(:,1,1))
+    !
     CALL xc_metagcx( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
                       v1x, v2x, v3x, v1c, v2c, v3c )
     CALL xc_cider_x( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
                       v1x, v2x, v3x, vfeat)
     !
-    !CALL cider_lpot (vfeat(:,1,1), v1x(:,1))
+    CALL cider_lpot (vfeat(:,1,1), v1x(:,1))
     !
     DO k = 1, dfftp%nnr
        !
@@ -272,7 +273,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
     !
     CALL xc_metagcx( dfftp%nnr, 2, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
                      v1x, v2x, v3x, v1c, v2c, v3c )
-    CALL xc_cider_x( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
+    CALL xc_cider_x( dfftp%nnr, 2, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
                       v1x, v2x, v3x, vfeat)
     !
     CALL cider_lpot (vfeat(:,1,1), v1x(:,1))
@@ -305,6 +306,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
     CALL rhoz_or_updw( rho, 'both', '->rhoz' )
     !
   ENDIF
+  DEALLOCATE(rhogsum)
   !
   DEALLOCATE( ex, ec )
   DEALLOCATE( v1x, v2x, v3x )
@@ -1745,20 +1747,17 @@ SUBROUTINE cider_feat( rhog, feat )
 !$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
      !
-     fac = SQRT(pi/aexp) * EXP(-gg(ig) / (4.D0 * aexp))
+     fac = (pi/aexp)**1.5 * EXP(-gg(ig) * tpiba2 / (4.D0 * aexp))
      !
      rgtot_re = REAL(  rhog(ig) )
      rgtot_im = AIMAG( rhog(ig) )
      !
      aux1(1,ig) = rgtot_re * fac
      aux1(2,ig) = rgtot_im * fac
-     !if (isnan(aux1(1,ig)).or.isnan(aux1(2,ig))) then
-     if (isnan(rgtot_im).or.isnan(rgtot_re)) then
-        print *, 'nan aux1', ig
-     endif
      !
   ENDDO
 !$omp end parallel do
+  !
   ! 
   aux(:) = 0.D0
   !
@@ -1839,7 +1838,7 @@ SUBROUTINE cider_lpot( vr, v )
 !$omp parallel do private( fac, rgtot_re, rgtot_im ), reduction(+:ehart)
   DO ig = 1, ngm
      !
-     fac = SQRT(pi/aexp) * EXP(-gg(ig) / (4.D0 * aexp))
+     fac = (pi/aexp)**1.5 * EXP(-gg(ig) * tpiba2 / (4.D0 * aexp))
      !
      rgtot_re = REAL(  vg(ig) )
      rgtot_im = AIMAG( vg(ig) )

@@ -34,7 +34,7 @@ SUBROUTINE xc_cider_x( length, ns, np, rho, grho, tau, feat, ex, v1x, v2x, v3x, 
     allocate( rho_tot(length) )
     x43 = 1.33333333333333333333333_DP
     x13 = 0.33333333333333333333333_DP
-    xf = 0.01_DP
+    xf = 0.1_DP
     vfeat = 0.0_DP
     rho_tot = 0.0_DP
     !
@@ -42,16 +42,21 @@ SUBROUTINE xc_cider_x( length, ns, np, rho, grho, tau, feat, ex, v1x, v2x, v3x, 
     do is = 1, ns
         rho_tot = rho_tot + rho(:,is)
     enddo
-    do k = 1, length
-        do is = 1, ns
-            ex(k) = ex(k) + xf * feat(k,is,1) * rho(k,is)**x43 / (ABS(rho_tot(k)) + 1.0e-8_DP)
-            v1x(k,is) = v1x(k,is) + xf * feat(k,is,1) * x43 * Abs(rho(k,is))**x13
-            vfeat(k,is,1) = vfeat(k,is,1) + xf * rho(k,is)**x43
-            if (isnan(v1x(k,is))) then
-                print *, k, is
-            endif
+    if (ns==1) then
+        do k = 1, length
+            ex(k) = ex(k) + 2 * xf * feat(k,1,1)/2.0_dp * abs(rho(k,1)/2.0_dp)**x43
+            v1x(k,1) = v1x(k,1) + xf * feat(k,1,1)/2.0_dp * x43 * abs(rho(k,1)/2.0_dp)**x13
+            vfeat(k,1,1) = vfeat(k,1,1) + xf * abs(rho(k,1)/2.0_dp)**x43
         enddo
-    enddo
+    else
+        do k = 1, length
+            do is=1,ns
+                ex(k) = ex(k) + xf * feat(k,is,1) * abs(rho(k,is))**x43
+                v1x(k,is) = v1x(k,is) + xf * feat(k,is,1) * x43 * abs(rho(k,is))**x13
+                vfeat(k,is,1) = vfeat(k,is,1) + xf * abs(rho(k,is))**x43
+            enddo
+        enddo
+    endif
     !
     return
     !
