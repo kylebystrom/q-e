@@ -1705,7 +1705,7 @@ END SUBROUTINE gradv_h_of_rho_r
 !----------------------------------------------------------------------------
 SUBROUTINE cider_feat( rhog, feat )
   !----------------------------------------------------------------------------
-  !! Hartree potential VH(r) from n(G)
+  !! Cider features from density in reciprocal space
   !
   USE constants,         ONLY : fpi, e2, pi
   USE kinds,             ONLY : DP
@@ -1738,7 +1738,7 @@ SUBROUTINE cider_feat( rhog, feat )
   !
   ALLOCATE( aux( dfftp%nnr ), aux1( 2, ngm ) )
   !
-  ! ... calculate hartree potential in G-space (NB: V(G=0)=0 )
+  ! ... calculate CIDER features in reciprocal space
   !
   aux1(:,:) = 0.D0
   aexp = 0.2
@@ -1768,11 +1768,11 @@ SUBROUTINE cider_feat( rhog, feat )
      !
   END IF
   !
-  ! ... transform hartree potential to real space
+  ! ... transform CIDER potential to real space
   !
   CALL invfft('Rho', aux, dfftp)
   !
-  ! ... add hartree potential to the xc potential
+  ! ... set to features
   !
   feat = DBLE(aux(:))
   !
@@ -1786,7 +1786,7 @@ END SUBROUTINE cider_feat
 !
 SUBROUTINE cider_lpot( vr, v )
   !----------------------------------------------------------------------------
-  !! Hartree potential VH(r) from n(G)
+  !! CIDER potential wrt density from potential wrt features
   !
   USE constants,         ONLY : fpi, e2, pi
   USE kinds,             ONLY : DP
@@ -1802,7 +1802,6 @@ SUBROUTINE cider_lpot( vr, v )
   IMPLICIT NONE
   !
   REAL(DP), INTENT(IN) :: vr(dfftp%nnr)
-  !! the charge density in reciprocal space
   REAL(DP), INTENT(INOUT) :: v(dfftp%nnr)
   !
   !  ... local variables
