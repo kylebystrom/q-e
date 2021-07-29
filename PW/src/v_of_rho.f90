@@ -1743,7 +1743,6 @@ SUBROUTINE cider_feat( rhog, feat )
   aux1(:,:) = 0.D0
   aexp = 0.2
   !
-  print *, 'first entry'
 !$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
      !
