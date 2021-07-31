@@ -163,6 +163,17 @@ MODULE input_parameters
         CHARACTER(len=256) :: pseudo_dir = './'
         !! specify the directory containing the pseudopotentials
 
+        CHARACTER(len=256) :: cider_param_dir = './'
+        ! specify the location of parameter files for custom model
+
+        CHARACTER(len=256) :: cider_param_file = ' '
+        ! specify which file to use for parameters of custom model
+
+        ! parameters for custom model, not to be included in the namelist
+        INTEGER :: cider_nbas,cider_nfeat
+        REAL(DP), ALLOCATABLE :: cider_params(:)
+        !REAL(DP) :: params(5)
+
         REAL(DP) :: refg = 0.05_DP
         !! Accurancy of the interpolation table, interval between
         !! table values in Rydberg
@@ -287,7 +298,7 @@ MODULE input_parameters
           gdir, nppstr, wf_collect, lelfield, nberrycyc, refg,            &
           tefield2, saverho, tabps, use_wannier, lecrpa,                  &
           lfcp, tqmmm, vdw_table_name, lorbm, memory, point_label_type,   &
-          input_xml_schema_file, gate
+          input_xml_schema_file, gate, cider_param_dir, cider_param_file
 !
 !=----------------------------------------------------------------------------=!
 !  SYSTEM Namelist Input Parameters

@@ -107,6 +107,16 @@ MODULE read_namelists_module
           pseudo_dir = TRIM( pseudo_dir ) // '/espresso/pseudo/'
        END IF
        !
+       ! ... directory containing cider parameters
+       !
+       CALL get_environment_variable( 'ESPRESSO_CIDER_PARAMS', cider_param_dir )
+       If ( TRIM( cider_param_dir ) == ' ' ) THEN
+          CALL get_environment_variable( 'HOME', cider_param_dir )
+          cider_param_dir = TRIM( cider_param_dir ) // '/espresso/cider_params'
+       ENDIF
+       cider_param_file = ' '
+       !
+       !
        ! ... max number of md steps added to the xml file. Needs to be limited for very long 
        !     md simulations 
        CALL get_environment_variable('MAX_XML_STEPS', temp_string) 
@@ -789,6 +799,8 @@ MODULE read_namelists_module
        CALL mp_bcast( input_xml_schema_file, ionode_id, intra_image_comm )
        CALL mp_bcast( gate,          ionode_id, intra_image_comm ) !TB
        CALL mp_bcast( mbd_vdw,        ionode_id, intra_image_comm ) !GSz
+       CALL mp_bcast( cider_param_dir,  ionode_id, intra_image_comm )
+       CALL mp_bcast( cider_param_file, ionode_id, intra_image_comm )
        !
        RETURN
        !

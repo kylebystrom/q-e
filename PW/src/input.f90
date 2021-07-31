@@ -222,7 +222,9 @@ SUBROUTINE iosys()
                                gdir, nppstr, wf_collect,lelfield,lorbm,efield, &
                                nberrycyc, efield_cart, lecrpa,                 &
                                lfcp, vdw_table_name, memory, max_seconds,      &
-                               tqmmm, efield_phase, gate, max_xml_steps
+                               tqmmm, efield_phase, gate, max_xml_steps,       &
+                               cider_param_dir, cider_param_file,              &
+                               cider_params, cider_nbas, cider_nfeat
 
   !
   ! ... SYSTEM namelist
@@ -328,6 +330,7 @@ SUBROUTINE iosys()
   !
   CHARACTER(LEN=256), EXTERNAL :: trimcheck
   CHARACTER(LEN=256):: dft_
+  CHARACTER(LEN=256):: cider_param_fname
   !
   INTEGER  :: ia, nt, tempunit, i, j
   LOGICAL  :: exst, parallelfs, domag, stop_on_error
@@ -342,6 +345,16 @@ SUBROUTINE iosys()
   lecrpa_     = lecrpa  
   !
   lforce    = tprnfor
+  !
+  SELECT CASE( TRIM(input_dft) )
+  CASE( 'custom' )
+     write(*,*) "Reading in CIDER params"
+     cider_param_fname = TRIM(cider_param_dir) // TRIM(cider_param_file)
+     OPEN(unit=99, file=cider_param_fname, action='read')
+     ALLOCATE(cider_params(3))
+     READ(99,*) cider_nbas, cider_nfeat, cider_params
+     CLOSE(unit=99)
+  END SELECT
   !
   SELECT CASE( trim( calculation ) )
   CASE( 'scf' )

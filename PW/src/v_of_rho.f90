@@ -1872,3 +1872,95 @@ SUBROUTINE cider_lpot( vr, v )
   RETURN
   !
 END SUBROUTINE cider_lpot
+!
+!
+SUBROUTINE transform_cider_feat( length, cider_exp, feat_in, feat_out )
+    !
+    ! Takes CIDER auxiliary basis features as input, along with
+    ! CIDER exponents, and returns the basis-transformed version
+    !
+    USE kind_l,            ONLY: DP
+    USE input_parameters,  ONLY: cider_params, cider_nbas, cider_nfeat
+    USE constants,         ONLY: pi
+    !
+    IMPLICIT NONE
+    !
+    integer, intent(in) :: length
+    !TODO might need to add this back to compute exponent
+    !real(dp), intent(in) :: rho(length,ns)
+    !real(dp), intent(in) :: grho(3,length,ns)
+    !real(dp), intent(in) :: tau(length,ns)
+    real(dp), intent(in) :: cider_exp(length)
+    real(dp), intent(in) :: feat_in(length,cider_nbas)
+    real(dp), intent(out) :: feat_out(length,cider_nfeat)
+    !
+    integer :: i,j
+    real(dp), allocatable :: bas_exp(:)
+    real(dp), allocatable :: sinv(:,:)
+    real(dp), allocatable :: fc(:,:)
+    real(dp), allocatable :: dfc(:,:)
+    real(dp), allocatable :: cvec(:,:)
+    real(dp), allocatable :: dcvec(:,:)
+    real(dp)              :: cider_maxexp, cider_xexp
+    !
+    allocate ( bas_exp(cider_nbas) )
+    allocate ( sinv(cider_nbas, cider_nbas) )
+    allocate ( fc(length*cider_nfeat, cider_nbas) )
+    allocate ( dfc(length*cider_nfeat, cider_nbas) )
+    allocate ( cvec(length*cider_nfeat, cider_nbas) )
+    allocate ( dcvec(length*cider_nfeat, cider_nbas) )
+    cider_maxexp = cider_params(1)
+    cider_xexp = cider_params(2)
+    !
+    do i=1,cider_nbas
+        bas_exp(i) = cider_maxexp / cider_xexp**(i-1)
+    enddo
+    do i=1,cider_nbas
+        do j=1,cider_nbas
+            sinv(i,j) = sqrt( pi / (bas_exp(i) + bas_exp(j)) )**3
+        enddo
+    enddo
+    !
+    CALL MatInv('L', cider_nbas, sinv)
+    !
+    do i=1,length*cider_nfeat
+        do j=1,cider_nbas
+            cvec(i,j) = sqrt( pi / (cider_exp(i) + bas_exp(j)) )**3
+            dcvec(i,j) = -1.5_dp * cvec(i,j) / (cider_exp(i) + bas_exp(j))
+        enddo
+    enddo
+    !
+    fc = matmul(cvec, sinv) ! d_{i,sigma}
+    dfc = matmul(dcvec, sinv) ! deriv wrt alpha
+    do i=1,length
+        feat_out(i,1) = dot_product(fc(i,:), feat_in(i,:)) ! F_{ilm}
+    enddo
+    !
+    return
+    !
+END SUBROUTINE transform_cider_feat
+!
+SUBROUTINE transform_cider_nlpot ( length, ns, vfeat_in, vfeat_out )
+  !
+  !
+  USE kind_l,            ONLY: DP
+  USE input_parameters,  ONLY: cider_params, cider_nbas, cider_nfeat
+  USE constants,         ONLY: pi
+
+  IMPLICIT NONE
+
+  integer, intent(in) :: length
+  integer, intent(in) :: ns
+  real(dp), intent(in) :: vfeat_in(length,cider_nfeat,ns)
+  !real(dp), intent(in) :: fc(length,cider_nbas,cider_nalpha,ns)
+  !real(dp), intent(in) :: dfc(length,cider_nbas,cider_nalpha,ns)
+  real(dp), intent(out) :: vfeat_out(length,ns,cider_nbas)
+  !
+  !vfeat_in, fc
+  !do ifeat=1,cider_nfeat
+  !  vfeat_out(:,ibas,is) vfeat_in(:,ifeat,is) fc(:,ibas,ialpha,is)
+  !enddo
+  !
+  return
+  !
+END SUBROUTINE transform_cider_nlpot

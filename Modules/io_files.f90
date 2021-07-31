@@ -36,7 +36,7 @@ MODULE io_files
   CHARACTER(len=6) :: postfix  = '.save/'
   !! postfix is appended to directory names
 #else
-  CHARACTER(len=6) :: postfix  = '.save\'
+  !CHARACTER(len=6) :: postfix  = '.save\'
 #endif
 #else
   CHARACTER(len=6) :: postfix  = '.save/'
@@ -44,6 +44,10 @@ MODULE io_files
   !
   CHARACTER(len=6)   :: nd_nmbr = '000000'
   !! for parallel case and distributed I/O: node number
+  CHARACTER(len=256) :: cider_param_dir = './'
+  !! directory for CIDER functional parameters
+  CHARACTER(len=256) :: cider_param_file = ' '
+  !! file for CIDER functional parameters
   CHARACTER(len=256) :: pseudo_dir = './'
   !! directory where pseudopotential files are found
   CHARACTER(len=256) :: pseudo_dir_cur = ' '
