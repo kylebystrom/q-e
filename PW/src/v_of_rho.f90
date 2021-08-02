@@ -154,10 +154,13 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   !! Non-local XC potential using CIDER descriptors
   !
   USE kinds,            ONLY : DP
-  USE constants,        ONLY : e2, eps8
+  USE constants,        ONLY : e2, eps8, pi
+  USE input_parameters, ONLY : cider_consts, cider_nalpha, cider_nfeat, &
+                               cider_lmax, cider_nl, cider_nbas, &
+                               a_list, l_list, lm_list
   USE io_global,        ONLY : stdout
   USE fft_base,         ONLY : dfftp
-  USE gvect,            ONLY : g, ngm
+  USE gvect,            ONLY : g, gg, ngm
   USE lsda_mod,         ONLY : nspin
   USE cell_base,        ONLY : omega
   USE funct,            ONLY : dft_is_nonlocc, nlc
@@ -190,8 +193,18 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   REAL(DP), ALLOCATABLE :: ex(:), ec(:)
   REAL(DP), ALLOCATABLE :: v1x(:,:), v2x(:,:), v3x(:,:)
   REAL(DP), ALLOCATABLE :: v1c(:,:), v2c(:,:,:), v3c(:,:)
+  !
+  ! CIDER arrays
+  REAL(DP), ALLOCATABLE :: bas(:,:,:,:)
   REAL(DP), ALLOCATABLE :: feat(:,:,:)
   REAL(DP), ALLOCATABLE :: vfeat(:,:,:)
+  REAL(DP), ALLOCATABLE :: vbas(:,:,:,:)
+  REAL(DP), ALLOCATABLE :: vexp(:,:,:)
+  REAL(DP), ALLOCATABLE :: ylm(:,:)
+  REAL(DP), ALLOCATABLE :: fc(:,:,:,:)
+  REAL(DP), ALLOCATABLE :: dfc(:,:,:,:)
+  REAL(DP), ALLOCATABLE :: cider_exp(:,:,:)
+  REAL(DP), ALLOCATABLE :: const(:,:,:)
   !
   REAL(DP) :: fac
        
@@ -202,6 +215,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   REAL(DP), ALLOCATABLE :: rhoout(:)
   COMPLEX(DP), ALLOCATABLE :: rhogsum(:)
   REAL(DP), PARAMETER :: eps12 = 1.0d-12, zero=0._dp
+  !
+  INTEGER :: ialpha, ifeat, l, lmind, ibas, m
   !
   CALL start_clock( 'v_xc_cider' )
   !
@@ -221,34 +236,105 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ALLOCATE( ex(dfftp%nnr), ec(dfftp%nnr) )
   ALLOCATE( v1x(dfftp%nnr,nspin), v2x(dfftp%nnr,nspin)   , v3x(dfftp%nnr,nspin) )
   ALLOCATE( v1c(dfftp%nnr,nspin), v2c(np,dfftp%nnr,nspin), v3c(dfftp%nnr,nspin) )
-  ALLOCATE( feat(dfftp%nnr,nspin,1) ) ! TODO change 1 to nfeat
-  ALLOCATE( vfeat(dfftp%nnr,nspin,1) ) ! TODO change 1 to nfeat
+  ALLOCATE( feat(dfftp%nnr,cider_nfeat,nspin) ) ! TODO change 1 to nfeat
+  ALLOCATE( vfeat(dfftp%nnr,cider_nfeat,nspin) ) ! TODO change 1 to nfeat
+  ALLOCATE( bas(dfftp%nnr,cider_nbas,cider_nl,nspin) )
+  ALLOCATE( vbas(dfftp%nnr,cider_nbas,cider_nl,nspin) )
+  ALLOCATE( vexp(dfftp%nnr,cider_nalpha,nspin) )
+  ALLOCATE( fc(dfftp%nnr,cider_nbas,cider_nalpha,nspin) )
+  ALLOCATE( dfc(dfftp%nnr,cider_nbas,cider_nalpha,nspin) )
+  ALLOCATE( ylm(ngm,cider_nl) )
+  ALLOCATE( cider_exp(dfftp%nnr,cider_nalpha,nspin) )
+  ALLOCATE( const(dfftp%nnr,cider_nfeat,nspin) )
   !
   ! ... calculate the gradient of rho + rho_core in real space
   ! ... in LSDA case rhogsum is in (up,down) format
   !
-  DO is = 1, nspin
-     !
-     rhogsum(:) = fac*rhog_core(:) + ( rho%of_g(:,1) + sgn(is)*rho%of_g(:,nspin) )*0.5D0
-     !
-     CALL fft_gradient_g2r( dfftp, rhogsum, g, grho(1,1,is) )
-     !
-  ENDDO
-  
+  CALL ylmr2(cider_nl, ngm, g, gg, ylm)
   !
+  IF (nspin == 2) THEN
+    CALL rhoz_or_updw( rho, 'both', '->updw' )
+  ENDIF
+  !
+  DO is = 1, nspin
+    !
+    !rhogsum(:) = fac*rhog_core(:) + ( rho%of_g(:,1) + sgn(is)*rho%of_g(:,nspin) )*0.5D0
+    rhogsum(:) = fac*rhog_core(:) + rho%of_g(:,is) ! rhoz is transformed to updw above
+    !
+    CALL fft_gradient_g2r( dfftp, rhogsum, g, grho(1,1,is) )
+    !
+    do ibas=1,cider_nbas
+      lmind=1
+      do l=0,cider_lmax
+        do m=-l,l
+          CALL get_cider_bas( rhogsum, bas(:,ibas,lmind,is), ylm(:,lmind), l )
+          lmind=lmind+1
+        enddo
+      enddo
+    enddo
+    !
+    do ialpha=1,cider_nalpha
+      CALL get_cider_alpha( dfftp%nnr, rho%of_r(:,is), grho(:,:,is), rho%kin_r(:,is)/e2, &
+                            cider_consts(:,ialpha), cider_exp(:,ialpha,is) )
+      CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is), &
+                            fc(:,:,ialpha,is), dfc(:,:,ialpha,is) )
+    enddo
+    do ifeat=1,cider_nfeat
+      l = l_list(ifeat)
+      lmind = lm_list(ifeat)
+      ialpha = a_list(ifeat)
+      const(:,ifeat,is) = cider_consts(2,ialpha)**1.5_DP * SQRT(4*pi**(1-l))  &
+                          * (8*pi/3)**(l/3.0) * cider_exp(:,ialpha,is)**(l/2.0)
+      feat(:,ifeat,is) = SUM(fc(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
+      feat(:,ifeat,is) = feat(:,ifeat,is) * const(:,ifeat,is)
+    enddo
+    !
+  ENDDO
+  !
+  DEALLOCATE(rhogsum)
+  !
+  ! TODO problems for nspin>2
+  CALL xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
+                     v1x, v2x, v3x, v1c, v2c, v3c )
+  CALL xc_cider_x( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
+                   v1x, v2x, v3x, vfeat )
+  !
+  DO is=1,nspin
+    !
+    do ifeat=1,cider_nfeat
+      lmind = lm_list(ifeat)
+      ialpha = a_list(ifeat)
+      vexp(:,ialpha,is) = vexp(:,ialpha,is) + feat(:,ifeat,is) * l / 2.0_DP &
+                                              / cider_exp(:,ialpha,is)
+      do ibas=1,cider_nbas
+        vbas(:,ibas,lmind,is) = vbas(:,ibas,lmind,is) + const(:,ifeat,is) &
+                                * vfeat(:,ifeat,is) * fc(:,ibas,ialpha,is)
+        vexp(:,ialpha,is) = vexp(:,ialpha,is) + const(:,ifeat,is) &
+                            * dfc(:,ibas,ialpha,is) &
+                            * vfeat(:,ifeat,is) * bas(:,ibas,lmind,is)
+      enddo
+    enddo
+    !
+    do ibas=1,cider_nbas
+      lmind=1
+      do l=0,cider_lmax
+        do m=-l,l
+          CALL get_cider_lpot_bas( vbas(:,ibas,lmind,is), ylm(:,lmind), &
+                                   l, v1x(:,is) )
+          lmind=lmind+1
+        enddo
+      enddo
+    enddo
+    do ialpha=1,cider_nalpha
+      CALL get_cider_lpot_exp( dfftp%nnr, rho%of_r(:,is), &
+                               grho(:,:,is), rho%kin_r(:,is)/e2, &
+                               cider_consts(:,ialpha), cider_exp(:,ialpha,is), &
+                               vexp(:,ialpha,is), v1x(:,is), &
+                               v2x(:,is), v3x(:,is) )
+    enddo
+  ENDDO
   !
   IF (nspin == 1) THEN
-    !
-    !CALL cider_feat( rho%of_g(:,1), feat(:,1,1))
-    CALL cider_feat( rhogsum, feat(:,1,1))
-    !
-    CALL xc_metagcx( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
-                      v1x, v2x, v3x, v1c, v2c, v3c )
-    CALL xc_cider_x( dfftp%nnr, 1, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
-                      v1x, v2x, v3x, vfeat)
-    !
-    CALL cider_lpot (vfeat(:,1,1), v1x(:,1))
-    !
     DO k = 1, dfftp%nnr
        !
        v(k,1) = (v1x(k,1)+v1c(k,1)) * e2
@@ -266,18 +352,6 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
     ENDDO
     !
   ELSE
-    !
-    CALL rhoz_or_updw( rho, 'both', '->updw' )
-    CALL cider_feat ( rho%of_g(:,1), feat(:,1,1) )
-    CALL cider_feat ( rho%of_g(:,2), feat(:,2,1) )
-    !
-    CALL xc_metagcx( dfftp%nnr, 2, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
-                     v1x, v2x, v3x, v1c, v2c, v3c )
-    CALL xc_cider_x( dfftp%nnr, 2, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
-                      v1x, v2x, v3x, vfeat)
-    !
-    CALL cider_lpot (vfeat(:,1,1), v1x(:,1))
-    CALL cider_lpot (vfeat(:,2,1), v1x(:,2))
     !
     ! first term of the gradient correction : D(rho*Exc)/D(rho)
     !
@@ -303,10 +377,9 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
        !
     ENDDO
     !
-    CALL rhoz_or_updw( rho, 'both', '->rhoz' )
+    CALL rhoz_or_updw( rho, 'both', '->rhoz' ) ! transform rho back
     !
   ENDIF
-  DEALLOCATE(rhogsum)
   !
   DEALLOCATE( ex, ec )
   DEALLOCATE( v1x, v2x, v3x )
@@ -1703,7 +1776,7 @@ SUBROUTINE gradv_h_of_rho_r( rho, gradv )
 END SUBROUTINE gradv_h_of_rho_r
 !
 !----------------------------------------------------------------------------
-SUBROUTINE cider_feat( rhog, feat )
+SUBROUTINE get_cider_bas( rhog, feat, ylm, l )
   !----------------------------------------------------------------------------
   !! Cider features from density in reciprocal space
   !
@@ -1721,6 +1794,8 @@ SUBROUTINE cider_feat( rhog, feat )
   IMPLICIT NONE
   !
   COMPLEX(DP), INTENT(IN) :: rhog(ngm)
+  REAL(DP), INTENT(IN) :: ylm(ngm)
+  INTEGER, INTENT(IN) :: l
   !! the charge density in reciprocal space
   REAL(DP), INTENT(INOUT) :: feat(dfftp%nnr)
   !
@@ -1734,7 +1809,7 @@ SUBROUTINE cider_feat( rhog, feat )
   INTEGER               :: nt
   REAL(DP)              :: aexp
   !
-  CALL start_clock( 'cider_feat' )
+  CALL start_clock( 'get_cider_bas' )
   !
   ALLOCATE( aux( dfftp%nnr ), aux1( 2, ngm ) )
   !
@@ -1747,6 +1822,7 @@ SUBROUTINE cider_feat( rhog, feat )
   DO ig = 1, ngm
      !
      fac = (pi/aexp)**1.5 * EXP(-gg(ig) * tpiba2 / (4.D0 * aexp))
+     fac = fac * (gg(ig) / (4 * aexp * aexp))**(DBLE(l)/2.0_DP) * ylm(ig) ! real sph_harm
      !
      rgtot_re = REAL(  rhog(ig) )
      rgtot_im = AIMAG( rhog(ig) )
@@ -1778,13 +1854,13 @@ SUBROUTINE cider_feat( rhog, feat )
   !
   DEALLOCATE( aux, aux1 )
   !
-  CALL stop_clock( 'cider_feat' )
+  CALL stop_clock( 'get_cider_bas' )
   !
   RETURN
   !
-END SUBROUTINE cider_feat
+END SUBROUTINE get_cider_bas
 !
-SUBROUTINE cider_lpot( vr, v )
+SUBROUTINE get_cider_lpot_bas( vr, ylm, l, v )
   !----------------------------------------------------------------------------
   !! CIDER potential wrt density from potential wrt features
   !
@@ -1802,6 +1878,8 @@ SUBROUTINE cider_lpot( vr, v )
   IMPLICIT NONE
   !
   REAL(DP), INTENT(IN) :: vr(dfftp%nnr)
+  REAL(DP), INTENT(IN) :: ylm(ngm)
+  INTEGER, INTENT(IN) :: l
   REAL(DP), INTENT(INOUT) :: v(dfftp%nnr)
   !
   !  ... local variables
@@ -1815,7 +1893,7 @@ SUBROUTINE cider_lpot( vr, v )
   INTEGER               :: nt
   REAL(DP)              :: aexp
   !
-  CALL start_clock( 'cider_lpot' )
+  CALL start_clock( 'get_cider_lpot_bas' )
   !
   ALLOCATE(vg(dfftp%nnr))
   vg = vr
@@ -1837,6 +1915,8 @@ SUBROUTINE cider_lpot( vr, v )
   DO ig = 1, ngm
      !
      fac = (pi/aexp)**1.5 * EXP(-gg(ig) * tpiba2 / (4.D0 * aexp))
+     !fac = fac * (k / (2 * aexp))**(DBLE(l)) * ylm ! real sph_harm
+     fac = fac * (gg(ig) / (4 * aexp * aexp))**(DBLE(l)/2.0_DP) * ylm(iG) ! real sph_harm
      !
      rgtot_re = REAL(  vg(ig) )
      rgtot_im = AIMAG( vg(ig) )
@@ -1867,48 +1947,40 @@ SUBROUTINE cider_lpot( vr, v )
   !
   DEALLOCATE( aux, aux1 )
   !
-  CALL stop_clock( 'cider_lpot' )
+  CALL stop_clock( 'get_cider_lpot_bas' )
   !
   RETURN
   !
-END SUBROUTINE cider_lpot
+END SUBROUTINE get_cider_lpot_bas
 !
 !
-SUBROUTINE transform_cider_feat( length, cider_exp, feat_in, feat_out )
+SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     !
     ! Takes CIDER auxiliary basis features as input, along with
     ! CIDER exponents, and returns the basis-transformed version
     !
     USE kind_l,            ONLY: DP
-    USE input_parameters,  ONLY: cider_params, cider_nbas, cider_nfeat
+    USE input_parameters,  ONLY: cider_params, cider_nbas
     USE constants,         ONLY: pi
     !
     IMPLICIT NONE
     !
-    integer, intent(in) :: length
-    !TODO might need to add this back to compute exponent
-    !real(dp), intent(in) :: rho(length,ns)
-    !real(dp), intent(in) :: grho(3,length,ns)
-    !real(dp), intent(in) :: tau(length,ns)
-    real(dp), intent(in) :: cider_exp(length)
-    real(dp), intent(in) :: feat_in(length,cider_nbas)
-    real(dp), intent(out) :: feat_out(length,cider_nfeat)
+    integer, intent(in)   :: length
+    real(dp), intent(in)  :: cider_exp(length)
+    real(dp), intent(out) :: fc(length,cider_nbas)
+    real(dp), intent(out) :: dfc(length,cider_nbas)
     !
     integer :: i,j
     real(dp), allocatable :: bas_exp(:)
     real(dp), allocatable :: sinv(:,:)
-    real(dp), allocatable :: fc(:,:)
-    real(dp), allocatable :: dfc(:,:)
     real(dp), allocatable :: cvec(:,:)
     real(dp), allocatable :: dcvec(:,:)
     real(dp)              :: cider_maxexp, cider_xexp
     !
     allocate ( bas_exp(cider_nbas) )
     allocate ( sinv(cider_nbas, cider_nbas) )
-    allocate ( fc(length*cider_nfeat, cider_nbas) )
-    allocate ( dfc(length*cider_nfeat, cider_nbas) )
-    allocate ( cvec(length*cider_nfeat, cider_nbas) )
-    allocate ( dcvec(length*cider_nfeat, cider_nbas) )
+    allocate ( cvec(length, cider_nbas) )
+    allocate ( dcvec(length, cider_nbas) )
     cider_maxexp = cider_params(1)
     cider_xexp = cider_params(2)
     !
@@ -1923,7 +1995,7 @@ SUBROUTINE transform_cider_feat( length, cider_exp, feat_in, feat_out )
     !
     CALL MatInv('L', cider_nbas, sinv)
     !
-    do i=1,length*cider_nfeat
+    do i=1,length
         do j=1,cider_nbas
             cvec(i,j) = sqrt( pi / (cider_exp(i) + bas_exp(j)) )**3
             dcvec(i,j) = -1.5_dp * cvec(i,j) / (cider_exp(i) + bas_exp(j))
@@ -1931,14 +2003,11 @@ SUBROUTINE transform_cider_feat( length, cider_exp, feat_in, feat_out )
     enddo
     !
     fc = matmul(cvec, sinv) ! d_{i,sigma}
-    dfc = matmul(dcvec, sinv) ! deriv wrt alpha
-    do i=1,length
-        feat_out(i,1) = dot_product(fc(i,:), feat_in(i,:)) ! F_{ilm}
-    enddo
+    dfc = matmul(dcvec, sinv) ! deriv wrt exponent
     !
     return
     !
-END SUBROUTINE transform_cider_feat
+END SUBROUTINE get_cider_coefs
 !
 SUBROUTINE transform_cider_nlpot ( length, ns, vfeat_in, vfeat_out )
   !
@@ -1964,3 +2033,57 @@ SUBROUTINE transform_cider_nlpot ( length, ns, vfeat_in, vfeat_out )
   return
   !
 END SUBROUTINE transform_cider_nlpot
+!
+!
+SUBROUTINE get_cider_alpha( length, rho, grho, kin, cider_consts, cider_exp )
+  !) rho%of_r, grho, rho%kin_r/e2, cider_exp(:,ialpha,1) )
+  USE kind_l, ONLY : DP
+  USE constants, ONLY : pi
+  IMPLICIT NONE
+
+  integer,  intent(in) :: length
+  real(dp), intent(in) :: rho(length)
+  real(dp), intent(in) :: grho(length)
+  real(dp), intent(in) :: kin(length)
+  real(dp), intent(in) :: cider_consts(4)
+  real(dp), intent(out) :: cider_exp(length)
+
+  real(dp) :: const1, const2, fac
+
+  fac = cider_consts(3) * 1.2 * (6 * pi**2)**(2.0/3) / pi
+  const1 = cider_consts(2) - fac
+  const2 = fac / (0.3 * (3 * pi**2)**(2.0_DP/3))
+  const1 = const1 * pi / 2**(2.0_DP/3)
+  const2 = const2 * pi / 2**(2.0_DP/3)
+
+  cider_exp = cider_consts(1) + const1 * rho**(2.0_DP/3) + const2 * kin / rho
+END SUBROUTINE get_cider_alpha
+SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
+                                cider_exp, vexp, v1x, v2x, v3x)
+  USE kind_l, ONLY : DP
+  USE constants, ONLY : pi
+  IMPLICIT NONE
+
+  integer,  intent(in) :: length
+  real(dp), intent(in) :: rho(length)
+  real(dp), intent(in) :: grho(length)
+  real(dp), intent(in) :: kin(length)
+  real(dp), intent(in) :: cider_consts(4)
+  real(dp), intent(in) :: cider_exp(length)
+  real(dp), intent(in) :: vexp(length)
+  real(dp), intent(inout) :: v1x(length)
+  real(dp), intent(inout) :: v2x(length)
+  real(dp), intent(inout) :: v3x(length)
+
+  real(dp) :: const1, const2, fac
+
+  fac = cider_consts(3) * 1.2 * (6 * pi**2)**(2.0/3) / pi
+  const1 = cider_consts(2) - fac
+  const2 = fac / (0.3 * (3 * pi**2)**(2.0_DP/3))
+  const1 = const1 * pi / 2**(2.0_DP/3)
+  const2 = const2 * pi / 2**(2.0_DP/3)
+
+  v1x = v1x + vexp * const1 / rho**(1.0_DP/3)
+  v1x = v1x + vexp * const2 * kin / rho**2
+  v3x = v3x + vexp * const2 / rho
+END SUBROUTINE get_cider_lpot_exp

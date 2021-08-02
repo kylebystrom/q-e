@@ -170,8 +170,10 @@ MODULE input_parameters
         ! specify which file to use for parameters of custom model
 
         ! parameters for custom model, not to be included in the namelist
-        INTEGER :: cider_nbas,cider_nfeat
+        INTEGER :: cider_nbas,cider_nfeat,cider_lmax,cider_nl,cider_nalpha
         REAL(DP), ALLOCATABLE :: cider_params(:)
+        REAL(DP), ALLOCATABLE :: cider_consts(:,:)
+        INTEGER,  ALLOCATABLE :: lm_list(:), l_list(:), a_list(:)
         !REAL(DP) :: params(5)
 
         REAL(DP) :: refg = 0.05_DP

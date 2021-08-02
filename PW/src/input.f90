@@ -224,7 +224,9 @@ SUBROUTINE iosys()
                                lfcp, vdw_table_name, memory, max_seconds,      &
                                tqmmm, efield_phase, gate, max_xml_steps,       &
                                cider_param_dir, cider_param_file,              &
-                               cider_params, cider_nbas, cider_nfeat
+                               cider_params, cider_nbas, cider_nfeat,          &
+                               lm_list, l_list, a_list, cider_consts,          &
+                               cider_lmax, cider_nl, cider_nalpha
 
   !
   ! ... SYSTEM namelist
@@ -337,6 +339,10 @@ SUBROUTINE iosys()
   REAL(DP) :: at_dum(3,3), theta, phi, ecutwfc_pp, ecutrho_pp, V
   CHARACTER(len=256) :: tempfile
   !
+  ! VARIABLES FOR CIDER INPUT READ
+  INTEGER :: iset, ind, mind, cider_nfeat_sets, ialpha
+  INTEGER, ALLOCATABLE :: cider_ls(:), ialphas(:), cider_feat_inds(:)
+  !
   ! MAIN CONTROL VARIABLES, MD AND RELAX
   !
   title_      = title
@@ -352,8 +358,37 @@ SUBROUTINE iosys()
      cider_param_fname = TRIM(cider_param_dir) // TRIM(cider_param_file)
      OPEN(unit=99, file=cider_param_fname, action='read')
      ALLOCATE(cider_params(3))
-     READ(99,*) cider_nbas, cider_nfeat, cider_params
+     READ(99,*) cider_nbas, cider_nfeat_sets, cider_params
+     READ(99,*) cider_lmax, cider_nalpha
+     ALLOCATE ( cider_consts(4,cider_nalpha) )
+     ALLOCATE ( cider_ls(cider_nfeat_sets) )
+     ALLOCATE ( ialphas(cider_nfeat_sets) )
+     ALLOCATE ( cider_feat_inds(cider_nfeat_sets) )
+     do ialpha=1,cider_nalpha
+        ! cider consts has shape (4,nalpha)
+        ! const a0 fac_mul amin
+        READ(99,*) cider_consts(1:4,ialpha)
+     enddo
+     cider_nl = (cider_lmax + 1) * (cider_lmax + 1)
+     cider_nfeat = 0
+     do iset=1,cider_nfeat_sets
+        READ(99,*) cider_ls(iset), ialphas(iset)
+        cider_feat_inds(iset) = cider_nfeat + 1
+        cider_nfeat = cider_nfeat + 2 * cider_ls(iset) + 1
+     enddo
      CLOSE(unit=99)
+     ALLOCATE( lm_list(cider_nfeat) )
+     ALLOCATE( l_list(cider_nfeat) )
+     ALLOCATE( a_list(cider_nfeat) )
+     do iset=1,cider_nfeat_sets
+        do mind=1,2*cider_ls(iset)+1
+          ind = cider_feat_inds(iset) + mind - 1
+          lm_list(ind) = cider_ls(iset) * cider_ls(iset) + mind
+          l_list(ind) = cider_ls(iset)
+          a_list(ind) = ialphas(iset)
+        enddo
+     enddo
+     DEALLOCATE( cider_ls )
   END SELECT
   !
   SELECT CASE( trim( calculation ) )
