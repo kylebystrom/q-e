@@ -286,12 +286,11 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       l = l_list(ifeat)
       lmind = lm_list(ifeat)
       ialpha = a_list(ifeat)
-      print *, l,lmind,ialpha, cider_consts(2,ialpha)
-      const(:,ifeat,is) = (cider_consts(2,ialpha))**1.5_DP &
+      const(:,ifeat,is) = cider_consts(2,ialpha)**1.5_DP &
                           * SQRT(4*pi**(1-l))  &
                           * (8*pi/3)**(l/3.0) * cider_exp(:,ialpha,is)**(l/2.0)
       feat(:,ifeat,is) = SUM(fc(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
-      feat(:,ifeat,is) = feat(:,ifeat,is) * const(:,ifeat,is)
+      feat(:,ifeat,is) = feat(:,ifeat,is) !* const(:,ifeat,is)
     enddo
     !
   ENDDO
@@ -326,7 +325,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       do l=0,cider_lmax
         do m=-l,l
           CALL get_cider_lpot_bas( vbas(:,ibas,lmind,is), ylm(:,lmind), &
-                                   l, v1x(:,is) )
+                                   l, ibas, v1x(:,is) )
           lmind=lmind+1
         enddo
       enddo
@@ -1826,7 +1825,6 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
   aux1(:,:) = 0.D0
   !aexp = 0.2
   aexp = cider_params(1) / cider_params(2)**(ibas-1)
-  print *, cider_params(1), cider_params(2), ibas, aexp
   !
 !$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
@@ -1870,11 +1868,12 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
   !
 END SUBROUTINE get_cider_bas
 !
-SUBROUTINE get_cider_lpot_bas( vr, ylm, l, v )
+SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
   !----------------------------------------------------------------------------
   !! CIDER potential wrt density from potential wrt features
   !
   USE constants,         ONLY : fpi, e2, pi
+  USE input_parameters,  ONLY : cider_params
   USE kinds,             ONLY : DP
   USE fft_base,          ONLY : dfftp
   USE fft_interfaces,    ONLY : invfft, fwfft
@@ -1890,6 +1889,7 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, v )
   REAL(DP), INTENT(IN) :: vr(dfftp%nnr)
   REAL(DP), INTENT(IN) :: ylm(ngm)
   INTEGER, INTENT(IN) :: l
+  INTEGER, INTENT(IN) :: ibas
   REAL(DP), INTENT(INOUT) :: v(dfftp%nnr)
   !
   !  ... local variables
@@ -1919,7 +1919,8 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, v )
   !     the feature kernel, converting de/dfeat(k) to de/drho(k).
   !
   aux1(:,:) = 0.D0
-  aexp = 0.2
+  !aexp = 0.2
+  aexp = cider_params(1) / cider_params(2)**(ibas-1)
   !
 !$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
@@ -1999,15 +2000,16 @@ SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     enddo
     do i=1,cider_nbas
         do j=1,cider_nbas
-            sinv(i,j) = sqrt( pi / (bas_exp(i) + bas_exp(j)) )**3
+            sinv(i,j) = sqrt( pi / (bas_exp(i) + bas_exp(j)) )**3.0_DP / (4 * pi)
         enddo
     enddo
     !
-    CALL MatInv('L', cider_nbas, sinv)
+    CALL MatInv('G', cider_nbas, sinv)
+    ! if not G, need to fill matrix into square after calling above subroutine
     !
     do i=1,length
         do j=1,cider_nbas
-            cvec(i,j) = sqrt( pi / (cider_exp(i) + bas_exp(j)) )**3
+            cvec(i,j) = sqrt( pi / (cider_exp(i) + bas_exp(j)) )**3.0_DP / (4 * pi)
             dcvec(i,j) = -1.5_dp * cvec(i,j) / (cider_exp(i) + bas_exp(j))
         enddo
     enddo

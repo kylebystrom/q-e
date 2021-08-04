@@ -35,7 +35,7 @@ SUBROUTINE xc_cider_x( length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v2x
     allocate( rho_tot(length) )
     x43 = 1.33333333333333333333333_DP
     x13 = 0.33333333333333333333333_DP
-    xf = 0.1_DP
+    xf = 0.1_DP * SQRT(4 * 3.141592653)
     vfeat = 0.0_DP
     rho_tot = 0.0_DP
     !
