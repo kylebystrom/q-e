@@ -13,6 +13,9 @@ SUBROUTINE iosys()
   !! Note that many variables in internal modules, having the same name as
   !! those in input_parameters, are locally renamed by adding an underscore "_".
   !
+  ! forpy 
+  USE forpy_mod
+  !
   USE kinds,         ONLY : DP
   USE funct,         ONLY : get_dft_short
   USE xc_lib,        ONLY : xclib_set_exx_fraction, set_screening_parameter, &
@@ -340,8 +343,10 @@ SUBROUTINE iosys()
   CHARACTER(len=256) :: tempfile
   !
   ! VARIABLES FOR CIDER INPUT READ
-  INTEGER :: iset, ind, mind, cider_nfeat_sets, ialpha
+  INTEGER :: iset, ind, mind, cider_nfeat_sets, ialpha, ierror
   INTEGER, ALLOCATABLE :: cider_ls(:), ialphas(:), cider_feat_inds(:)
+  !
+  type(module_py) :: mldftat
   !
   ! MAIN CONTROL VARIABLES, MD AND RELAX
   !
@@ -389,6 +394,8 @@ SUBROUTINE iosys()
         enddo
      enddo
      DEALLOCATE( cider_ls )
+     ierror = forpy_initialize()
+     ierror = import_py(mldftat, "mldftdat.density")
   END SELECT
   !
   SELECT CASE( trim( calculation ) )

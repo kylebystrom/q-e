@@ -1,22 +1,23 @@
 !
-SUBROUTINE xc_cider_x( length, ns, np, rho, grho, tau, feat, ex, v1x, v2x, v3x, vfeat )
+SUBROUTINE xc_cider_x( length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v2x, v3x, vfeat )
     !
     USE kind_l,        ONLY: DP
     !
     IMPLICIT NONE
     !
     integer, intent(in) :: length
+    integer, intent(in) :: nfeat
     integer, intent(in) :: ns
     integer, intent(in) :: np
     real(dp), intent(in) :: rho(length,ns)
     real(dp), intent(in) :: grho(3,length,ns)
     real(dp), intent(in) :: tau(length,ns)
-    real(dp), intent(in) :: feat(length,ns,1)
+    real(dp), intent(in) :: feat(length,nfeat,ns)
     real(dp), intent(inout) :: ex(length)
     real(dp), intent(inout) :: v1x(length,ns)
     real(dp), intent(inout) :: v2x(length,ns)
     real(dp), intent(inout) :: v3x(length,ns)
-    real(dp), intent(out) :: vfeat(length,ns,1)
+    real(dp), intent(out) :: vfeat(length,nfeat,ns)
     !
     integer :: is,k
     real(dp) :: x43,x13
@@ -51,9 +52,9 @@ SUBROUTINE xc_cider_x( length, ns, np, rho, grho, tau, feat, ex, v1x, v2x, v3x, 
     else
         do k = 1, length
             do is=1,ns
-                ex(k) = ex(k) + xf * feat(k,is,1) * abs(rho(k,is))**x43
+                ex(k) = ex(k) + xf * feat(k,1,is) * abs(rho(k,is))**x43
                 v1x(k,is) = v1x(k,is) + xf * feat(k,is,1) * x43 * abs(rho(k,is))**x13
-                vfeat(k,is,1) = vfeat(k,is,1) + xf * abs(rho(k,is))**x43
+                vfeat(k,1,is) = vfeat(k,1,is) + xf * abs(rho(k,is))**x43
             enddo
         enddo
     endif

@@ -252,6 +252,9 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   !
   CALL ylmr2(cider_nl, ngm, g, gg, ylm)
   !
+  vexp = 0.0_DP
+  vbas = 0.0_DP
+  !
   IF (nspin == 2) THEN
     CALL rhoz_or_updw( rho, 'both', '->updw' )
   ENDIF
@@ -267,7 +270,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       lmind=1
       do l=0,cider_lmax
         do m=-l,l
-          CALL get_cider_bas( rhogsum, bas(:,ibas,lmind,is), ylm(:,lmind), l )
+          CALL get_cider_bas( rhogsum, bas(:,ibas,lmind,is), ylm(:,lmind), l, ibas )
           lmind=lmind+1
         enddo
       enddo
@@ -283,7 +286,9 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       l = l_list(ifeat)
       lmind = lm_list(ifeat)
       ialpha = a_list(ifeat)
-      const(:,ifeat,is) = cider_consts(2,ialpha)**1.5_DP * SQRT(4*pi**(1-l))  &
+      print *, l,lmind,ialpha, cider_consts(2,ialpha)
+      const(:,ifeat,is) = (cider_consts(2,ialpha))**1.5_DP &
+                          * SQRT(4*pi**(1-l))  &
                           * (8*pi/3)**(l/3.0) * cider_exp(:,ialpha,is)**(l/2.0)
       feat(:,ifeat,is) = SUM(fc(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
       feat(:,ifeat,is) = feat(:,ifeat,is) * const(:,ifeat,is)
@@ -296,7 +301,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ! TODO problems for nspin>2
   CALL xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
                      v1x, v2x, v3x, v1c, v2c, v3c )
-  CALL xc_cider_x( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, feat, ex, &
+  CALL xc_cider_x( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
+                   rho%kin_r/e2, feat, ex, &
                    v1x, v2x, v3x, vfeat )
   !
   DO is=1,nspin
@@ -1776,11 +1782,12 @@ SUBROUTINE gradv_h_of_rho_r( rho, gradv )
 END SUBROUTINE gradv_h_of_rho_r
 !
 !----------------------------------------------------------------------------
-SUBROUTINE get_cider_bas( rhog, feat, ylm, l )
+SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
   !----------------------------------------------------------------------------
   !! Cider features from density in reciprocal space
   !
   USE constants,         ONLY : fpi, e2, pi
+  USE input_parameters,  ONLY : cider_params
   USE kinds,             ONLY : DP
   USE fft_base,          ONLY : dfftp
   USE fft_interfaces,    ONLY : invfft
@@ -1796,6 +1803,7 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l )
   COMPLEX(DP), INTENT(IN) :: rhog(ngm)
   REAL(DP), INTENT(IN) :: ylm(ngm)
   INTEGER, INTENT(IN) :: l
+  INTEGER, INTENT(IN) :: ibas
   !! the charge density in reciprocal space
   REAL(DP), INTENT(INOUT) :: feat(dfftp%nnr)
   !
@@ -1816,7 +1824,9 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l )
   ! ... calculate CIDER features in reciprocal space
   !
   aux1(:,:) = 0.D0
-  aexp = 0.2
+  !aexp = 0.2
+  aexp = cider_params(1) / cider_params(2)**(ibas-1)
+  print *, cider_params(1), cider_params(2), ibas, aexp
   !
 !$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
@@ -1911,7 +1921,7 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, v )
   aux1(:,:) = 0.D0
   aexp = 0.2
   !
-!$omp parallel do private( fac, rgtot_re, rgtot_im ), reduction(+:ehart)
+!$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
      !
      fac = (pi/aexp)**1.5 * EXP(-gg(ig) * tpiba2 / (4.D0 * aexp))

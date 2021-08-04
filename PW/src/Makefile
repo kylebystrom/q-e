@@ -4,12 +4,13 @@ include ../../make.inc
 
 # location of needed modules and included files (if any)
 MODFLAGS= $(BASEMOD_FLAGS) \
-          $(MOD_FLAG)../../dft-d3/
+					$(MOD_FLAG)../../dft-d3/
 
 PWOBJS = \
 pwscf.o 
 
 PWLIBS = \
+forpy_mod.o \
 a2fmod.o \
 add_bfield.o \
 add_efield.o \
@@ -260,62 +261,65 @@ wannier_occ.o
 
 # GPU versions of routines
 PWLIBS += \
-  g_psi_mod_gpu.o \
-  g_psi_gpu.o \
-  h_psi_gpu.o \
-  vhpsi_gpu.o \
-  s_psi_gpu.o \
-  vloc_psi_gpu.o \
-  pwcom_gpu.o \
-  g2_kin_gpu.o \
-  scf_mod_gpu.o \
-  usnldiag_gpu.o \
-  add_vuspsi_gpu.o \
-  addusdens_gpu.o \
-  sum_band_gpu.o \
-  newd_gpu.o \
-  add_paw_to_deeq_gpu.o \
-  add_vhub_to_deeq_gpu.o \
-  wfcinit_gpu.o \
-  rotate_wfc_gpu.o \
-  hs_1psi_gpu.o \
-  hs_psi_gpu.o \
-  s_1psi_gpu.o \
-  utils_gpu.o \
-  force_lc_gpu.o \
-  force_us_gpu.o \
-  force_cc_gpu.o \
-  force_hub_gpu.o \
-  drhoc_gpu.o \
-  addusforce_gpu.o \
-  force_corr_gpu.o \
-  stres_loc_gpu.o \
-  dvloc_of_g_gpu.o \
-  stres_har_gpu.o \
-  stres_mgga_gpu.o \
-  stres_cc_gpu.o \
-  deriv_drhoc_gpu.o \
-  stres_ewa_gpu.o \
-  stres_knl_gpu.o \
-  stres_us_gpu.o \
-  compute_deff_gpu.o \
-  gen_us_dj_gpu.o \
-  gen_us_dy_gpu.o \
-  orthoatwfc_gpu.o \
-  atomic_wfc_gpu.o
+	g_psi_mod_gpu.o \
+	g_psi_gpu.o \
+	h_psi_gpu.o \
+	vhpsi_gpu.o \
+	s_psi_gpu.o \
+	vloc_psi_gpu.o \
+	pwcom_gpu.o \
+	g2_kin_gpu.o \
+	scf_mod_gpu.o \
+	usnldiag_gpu.o \
+	add_vuspsi_gpu.o \
+	addusdens_gpu.o \
+	sum_band_gpu.o \
+	newd_gpu.o \
+	add_paw_to_deeq_gpu.o \
+	add_vhub_to_deeq_gpu.o \
+	wfcinit_gpu.o \
+	rotate_wfc_gpu.o \
+	hs_1psi_gpu.o \
+	hs_psi_gpu.o \
+	s_1psi_gpu.o \
+	utils_gpu.o \
+	force_lc_gpu.o \
+	force_us_gpu.o \
+	force_cc_gpu.o \
+	force_hub_gpu.o \
+	drhoc_gpu.o \
+	addusforce_gpu.o \
+	force_corr_gpu.o \
+	stres_loc_gpu.o \
+	dvloc_of_g_gpu.o \
+	stres_har_gpu.o \
+	stres_mgga_gpu.o \
+	stres_cc_gpu.o \
+	deriv_drhoc_gpu.o \
+	stres_ewa_gpu.o \
+	stres_knl_gpu.o \
+	stres_us_gpu.o \
+	compute_deff_gpu.o \
+	gen_us_dj_gpu.o \
+	gen_us_dy_gpu.o \
+	orthoatwfc_gpu.o \
+	atomic_wfc_gpu.o
 
 QEMODS=../../Modules/libqemod.a ../../KS_Solvers/libks_solvers.a ../../upflib/libupf.a ../../XClib/xc_lib.a \
-       ../../FFTXlib/libqefft.a ../../LAXlib/libqela.a ../../UtilXlib/libutil.a ../../dft-d3/libdftd3qe.a
+			 ../../FFTXlib/libqefft.a ../../LAXlib/libqela.a ../../UtilXlib/libutil.a ../../dft-d3/libdftd3qe.a
 
 TLDEPS= bindir libs mods libks_solvers dftd3
 
-all : tldeps pw.x
+all : tldeps forpy_mod.o pw.x
+
+forpy_mod.o:
+	$(MPIF90) $(F90FLAGS) -c forpy_mod.F90 -lpython3.7m
 
 pw.x : $(PWOBJS) libpw.a $(LIBOBJS) $(QEMODS)
-	$(LD) $(LDFLAGS) -o $@ \
-	   $(PWOBJS) libpw.a $(QEMODS) $(LIBOBJS) $(QELIBS)
+	$(LD)  -o $@ \
+		 $(PWOBJS) libpw.a $(QEMODS) $(LIBOBJS) $(QELIBS) $(LDFLAGS)
 	- ( cd ../../bin; ln -fs ../PW/src/$@ . ; \
-               ln -fs ../PW/src/$@ dist.x ; ln -fs ../PW/src/$@ manypw.x ; )
+							 ln -fs ../PW/src/$@ dist.x ; ln -fs ../PW/src/$@ manypw.x ; )
 # dist.x and manypw.x link the same executable pw.x
 
 libpw.a : $(PWLIBS) 
