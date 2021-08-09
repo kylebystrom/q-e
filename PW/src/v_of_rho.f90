@@ -74,17 +74,9 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   ! ... calculate exchange-correlation potential
   !
   IF (xclib_get_id('LDA', 'EXCH') == -1) then
-     !rho%of_r = rho%of_r + 1e-8_dp
-     !CALL v_xc_cider( rho, rho_core, rhog_core, etxc2, vtxc, test_vr, test_vk )
-     !rho%of_r = rho%of_r - 1e-8_dp
      CALL v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
-     !print *, "xc check", (etxc2-etxc)/1e-8, vtxc
   ELSEIF (xclib_dft_is('meta')) then
-     !rho%of_r = rho%of_r + 1e-8_dp
-     !CALL v_xc_meta( rho, rho_core, rhog_core, etxc2, vtxc, test_vr, test_vk )
-     !rho%of_r = rho%of_r - 1e-8_dp
      CALL v_xc_meta( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
-     !print *, "xc check", (etxc2-etxc)/1e-8, vtxc
   ELSE
      CALL v_xc( rho, rho_core, rhog_core, etxc, vtxc, v%of_r )
   ENDIF
@@ -283,7 +275,6 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   !
   DO is = 1, nspin
     !
-    !rhogsum(:) = fac*rhog_core(:) + ( rho%of_g(:,1) + sgn(is)*rho%of_g(:,nspin) )*0.5D0
     rhogsum(:) = fac*rhog_core(:) + rho%of_g(:,is) ! rhoz is transformed to updw above
     !
     CALL fft_gradient_g2r( dfftp, rhogsum, g, grho(1,1,is) )
@@ -303,8 +294,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
                             cider_consts(:,ialpha), cider_exp(:,ialpha,is) )
       CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is), &
                             fc(:,:,ialpha,is), dfc(:,:,ialpha,is) )
-      CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is)+1e-8, &
-                            fc2(:,:,ialpha,is), dfc(:,:,ialpha,is) )
+      !CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is)+1e-8, &
+      !                      fc2(:,:,ialpha,is), dfc(:,:,ialpha,is) )
     enddo
     do ifeat=1,cider_nfeat
       l = l_list(ifeat)
@@ -312,17 +303,20 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       ialpha = a_list(ifeat)
       const(:,ifeat,is) = cider_consts(2,ialpha)**1.5_DP &
                           * SQRT(4*pi**(1-l))  &
-                          * (8*pi/3)**(l/3.0) !* cider_exp(:,ialpha,is)**(l/2.0)
+                          * (8*pi/3)**(l/3.0) * cider_exp(:,ialpha,is)**(l/2.0)
       const(:,ifeat,is) = cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const(:,ifeat,is)) &
                           + const(:,ifeat,is)
       feat(:,ifeat,is) = SUM(fc(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
       feat(:,ifeat,is) = feat(:,ifeat,is) * const(:,ifeat,is)
-      !dfeat(:,ifeat,is) = SUM(dfc(:,:,ialpha,is) * bas(:,:,lmind,is), 2) * const(:,ifeat,is)
-      !dfeat(:,ifeat,is) = dfeat(:,ifeat,is) + feat(:,ifeat,is) &
-      !                    * DBLE(l) / (2.0 * cider_exp(:,ialpha,is))
-      dfeat(:,ifeat,is) = SUM(fc2(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
-      dfeat(:,ifeat,is) = dfeat(:,ifeat,is) * const(:,ifeat,is)
-      dfeat(:,ifeat,is) = (dfeat(:,ifeat,is) - feat(:,ifeat,is)) / 1e-8
+      dfeat(:,ifeat,is) = SUM(dfc(:,:,ialpha,is) * bas(:,:,lmind,is), 2) * const(:,ifeat,is)
+      dfeat(:,ifeat,is) = dfeat(:,ifeat,is) + feat(:,ifeat,is) &
+                          * DBLE(l) / (2.0 * cider_exp(:,ialpha,is))
+
+      !dfeat(:,ifeat,is) = SUM(fc2(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
+      !dfeat(:,ifeat,is) = dfeat(:,ifeat,is) * const(:,ifeat,is)
+      !dfeat(:,ifeat,is) = (dfeat(:,ifeat,is) - feat(:,ifeat,is)) / 1e-8
+      ! TODO numerical derivative seems more stable for some reason
+      ! and so might want to change back to it
     enddo
     !
   ENDDO
@@ -342,7 +336,6 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       lmind = lm_list(ifeat)
       l = l_list(ifeat)
       ialpha = a_list(ifeat)
-      print *,l,cider_lmax, lmind, ialpha
       vexp(:,ialpha,is) = vexp(:,ialpha,is) + vfeat(:,ifeat,is) * dfeat(:,ifeat,is)
       do ibas=1,cider_nbas
         vbas(:,ibas,lmind,is) = vbas(:,ibas,lmind,is) + const(:,ifeat,is) &
@@ -2088,7 +2081,6 @@ SUBROUTINE get_cider_alpha( length, rho, grho, kin, cider_consts, cider_exp )
   const1 = const1 * pi / 2**(2.0_DP/3)
   const2 = const2 * pi / 2**(2.0_DP/3)
 
-  !cider_exp = cider_consts(1) + const1 * rho**(2.0_DP/3) + const2 * kin / rho
   cider_exp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
 
   do i=1,length
@@ -2125,50 +2117,13 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
   integer :: tot
   ns = DBLE(nspin)
 
-  allocate(cider_tmp(length))
-  CALL get_cider_alpha( length, rho+1e-8, grho, kin, cider_consts, cider_tmp )
-  v1x = v1x + vexp * (cider_tmp - cider_exp) / 1e-8
-  CALL get_cider_alpha( length, rho, grho, kin+1e-8, cider_consts, cider_tmp )
-  v3x = v3x + vexp * (cider_tmp - cider_exp) / 1e-8
-
-  DEALLOCATE(cider_tmp)
-
-  return
-END SUBROUTINE get_cider_lpot_exp
-SUBROUTINE get_cider_lpot_exp2 ( length, rho, grho, kin, cider_consts, &
-                                cider_exp, vexp, v1x, v2x, v3x )
-  USE kind_l, ONLY : DP
-  USE lsda_mod, ONLY : nspin
-  USE constants, ONLY : pi
-  IMPLICIT NONE
-
-  integer,  intent(in) :: length
-  real(dp), intent(in) :: rho(length)
-  real(dp), intent(in) :: grho(length)
-  real(dp), intent(in) :: kin(length)
-  real(dp), intent(in) :: cider_consts(4)
-  real(dp), intent(in) :: cider_exp(length)
-  real(dp), intent(inout) :: vexp(length)
-  real(dp), intent(inout) :: v1x(length)
-  real(dp), intent(inout) :: v2x(length)
-  real(dp), intent(inout) :: v3x(length)
-
-  real(dp) :: const1, const2, fac
-  integer :: i
-  real(dp), allocatable :: cider_tmp(:)
-  real(dp) :: ns
-  integer :: tot
-  ns = DBLE(nspin)
-
   fac = cider_consts(3) * 1.2 * (6 * pi**2)**(2.0/3) / pi
   const1 = cider_consts(2) - fac
   const2 = fac / (0.3 * (3 * pi**2)**(2.0_DP/3))
   const1 = const1 * pi / 2**(2.0_DP/3)
   const2 = const2 * pi / 2**(2.0_DP/3)
-  print *, const1, const2, fac, cider_consts(4)
 
   allocate(cider_tmp(length))
-  !cider_tmp = cider_consts(1) + const1 * rho**(2.0_DP/3) + const2 * kin / rho
   cider_tmp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
 
   do i=1,length
@@ -2177,11 +2132,12 @@ SUBROUTINE get_cider_lpot_exp2 ( length, rho, grho, kin, cider_consts, &
     endif
   enddo
 
-  v1x = v1x + 2.0_DP/3.0_DP * vexp * const1 / (ns*rho+1e-8)**(1.0_DP/3)
-  v1x = v1x - vexp * const2 * kin / (rho+1e-8)**2
-  v3x = v3x + vexp * const2 / (rho+1e-8)
+  v1x = v1x + 2.0_DP/3.0_DP * DBLE(ns) * vexp &
+              * const1 / (ns*abs(rho)+1e-8)**(1.0_DP/3)
+  v1x = v1x - vexp * const2 * kin / (abs(rho)+1e-8)**2
+  v3x = v3x + vexp * const2 / (abs(rho)+1e-8)
 
   DEALLOCATE(cider_tmp)
 
   return
-END SUBROUTINE get_cider_lpot_exp2
+END SUBROUTINE get_cider_lpot_exp

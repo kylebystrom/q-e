@@ -48,16 +48,14 @@ SUBROUTINE xc_cider_x( length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v2x
             sgn = SIGN(1.0_dp, rho(k,1))
             rval = abs(rho(k,1))
             ex(k) = ex(k) + 2 * xf * feat(k,1,1)/2.0_dp * (rval/2.0_dp)**x43 * sgn
-
-            !v1x(k,1) = v1x(k,1) + 2.0 * xf * feat(k,1,1)/2.0_dp * x43 * abs(rho(k,1)/2.0_dp)**x13
-            !vfeat(k,1,1) = vfeat(k,1,1) + 2**(1.0_dp/3) * xf * abs(rho(k,1)/2.0_dp)**x43
             v1x(k,1) = v1x(k,1) + xf * feat(k,1,1)/2.0_dp * x43 * (rval/2.0_dp)**x13
             vfeat(k,1,1) = vfeat(k,1,1) + xf * (rval/2.0_dp)**x43
         enddo
     else
         do k = 1, length
             do is=1,ns
-                ex(k) = ex(k) + xf * feat(k,1,is) * abs(rho(k,is))**x43
+                sgn = SIGN(1.0_dp, rho(k,1))
+                ex(k) = ex(k) + xf * feat(k,1,is) * abs(rho(k,is))**x43 * sgn
                 v1x(k,is) = v1x(k,is) + xf * feat(k,is,1) * x43 * abs(rho(k,is))**x13
                 vfeat(k,1,is) = vfeat(k,1,is) + xf * abs(rho(k,is))**x43
             enddo
