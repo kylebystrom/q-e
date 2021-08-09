@@ -19,9 +19,9 @@ SUBROUTINE xc_cider_x( length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v2x
     real(dp), intent(inout) :: v3x(length,ns)
     real(dp), intent(out) :: vfeat(length,nfeat,ns)
     !
-    integer :: is,k
+    integer :: is,k,sgn
     real(dp) :: x43,x13
-    real(dp) :: xf
+    real(dp) :: xf,rval
     real(dp), allocatable :: grho2(:,:)
     real(dp), allocatable :: rho_tot(:)
     !
@@ -45,9 +45,14 @@ SUBROUTINE xc_cider_x( length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v2x
     enddo
     if (ns==1) then
         do k = 1, length
-            ex(k) = ex(k) + 2 * xf * feat(k,1,1)/2.0_dp * abs(rho(k,1)/2.0_dp)**x43
-            v1x(k,1) = v1x(k,1) + xf * feat(k,1,1)/2.0_dp * x43 * abs(rho(k,1)/2.0_dp)**x13
-            vfeat(k,1,1) = vfeat(k,1,1) + xf * abs(rho(k,1)/2.0_dp)**x43
+            sgn = SIGN(1.0_dp, rho(k,1))
+            rval = abs(rho(k,1))
+            ex(k) = ex(k) + 2 * xf * feat(k,1,1)/2.0_dp * (rval/2.0_dp)**x43 * sgn
+
+            !v1x(k,1) = v1x(k,1) + 2.0 * xf * feat(k,1,1)/2.0_dp * x43 * abs(rho(k,1)/2.0_dp)**x13
+            !vfeat(k,1,1) = vfeat(k,1,1) + 2**(1.0_dp/3) * xf * abs(rho(k,1)/2.0_dp)**x43
+            v1x(k,1) = v1x(k,1) + xf * feat(k,1,1)/2.0_dp * x43 * (rval/2.0_dp)**x13
+            vfeat(k,1,1) = vfeat(k,1,1) + xf * (rval/2.0_dp)**x43
         enddo
     else
         do k = 1, length
