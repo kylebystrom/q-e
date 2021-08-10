@@ -1296,6 +1296,7 @@ init_vloc.o : ../../upflib/gth.o
 init_vloc.o : ../../upflib/uspp.o
 init_vloc.o : Coul_cut_2D.o
 init_vloc.o : pwcom.o
+input.o : ../../Modules/forpy_mod.o
 input.o : ../../Modules/bfgs_module.o
 input.o : ../../Modules/cell_base.o
 input.o : ../../Modules/check_stop.o
@@ -2830,6 +2831,7 @@ v_of_rho.o : ldaU.o
 v_of_rho.o : martyna_tuckerman.o
 v_of_rho.o : pwcom.o
 v_of_rho.o : scf_mod.o
+v_of_rho.o : ../../Modules/forpy_mod.o
 vcsmd.o : ../../Modules/cell_base.o
 vcsmd.o : ../../Modules/constants.o
 vcsmd.o : ../../Modules/constraints_module.o

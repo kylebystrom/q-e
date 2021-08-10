@@ -9,6 +9,7 @@ MODFLAGS=$(BASEMOD_FLAGS) \
 # list of modules
 
 MODULES = \
+forpy_mod.o \
 additional_kpoints.o \
 autopilot.o \
 basic_algebra_routines.o \
@@ -148,6 +149,9 @@ TLDEPS= libfox libutil libla libfft librxc
 all : libqemod.a
 
 ## The following is needed only for lapack compiled from sources
+
+forpy_mod.o:
+	$(MPIF90) $(F90FLAGS) -c forpy_mod.F90 -lpython3.7m
 
 dlamch.o : dlamch.f
 	$(F77) $(FFLAGS_NOOPT) -c $<

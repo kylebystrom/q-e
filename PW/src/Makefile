@@ -10,7 +10,6 @@ PWOBJS = \
 pwscf.o 
 
 PWLIBS = \
-forpy_mod.o \
 a2fmod.o \
 add_bfield.o \
 add_efield.o \
@@ -310,10 +309,7 @@ QEMODS=../../Modules/libqemod.a ../../KS_Solvers/libks_solvers.a ../../upflib/li
 
 TLDEPS= bindir libs mods libks_solvers dftd3
 
-all : tldeps forpy_mod.o pw.x
-
-forpy_mod.o:
-	$(MPIF90) $(F90FLAGS) -c forpy_mod.F90 -lpython3.7m
+all : tldeps pw.x
 
 pw.x : $(PWOBJS) libpw.a $(LIBOBJS) $(QEMODS)
 	$(LD)  -o $@ \

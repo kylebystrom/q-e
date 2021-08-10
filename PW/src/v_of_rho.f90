@@ -326,9 +326,9 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ! TODO problems for nspin>2
   CALL xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
                      v1x, v2x, v3x, v1c, v2c, v3c )
-  CALL xc_cider_x( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
-                   rho%kin_r/e2, feat, ex, &
-                   v1x, v2x, v3x, vfeat )
+  CALL xc_cider_x_py( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
+                      rho%kin_r/e2, feat, ex, &
+                      v1x, v2x, v3x, vfeat )
   !
   DO is=1,nspin
     !
@@ -2141,3 +2141,108 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
 
   return
 END SUBROUTINE get_cider_lpot_exp
+!
+SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v2x, v3x, vfeat )
+    !
+    USE forpy_mod
+    !
+    USE kind_l,        ONLY: DP
+    USE input_parameters, ONLY: cider_py_obj
+    !
+    IMPLICIT NONE
+    !
+    integer, intent(in) :: length
+    integer, intent(in) :: nfeat
+    integer, intent(in) :: ns
+    integer, intent(in) :: np
+    real(dp), intent(in) :: rho(length,ns)
+    real(dp), intent(in) :: grho(3,length,ns)
+    real(dp), intent(in) :: tau(length,ns)
+    real(dp), intent(in) :: feat(length,nfeat,ns)
+    real(dp), intent(inout) :: ex(length)
+    real(dp), intent(inout) :: v1x(length,ns)
+    real(dp), intent(inout) :: v2x(length,ns)
+    real(dp), intent(inout) :: v3x(length,ns)
+    real(dp), intent(out) :: vfeat(length,nfeat,ns)
+    !
+    integer :: is,k,sgn,ierror
+    real(dp) :: x43,x13
+    real(dp) :: xf,rval
+    real(dp), allocatable :: grho2(:,:)
+    real(dp), allocatable :: rho_tot(:)
+
+    type(tuple) :: args
+    type(ndarray) :: py_rho, py_grho, py_tau, py_feat, py_ex, py_v1x, py_v2x, py_v3x, py_vfeat
+
+    ierror = forpy_initialize()
+    print *, "init", ierror
+
+    ierror = ndarray_create(py_rho, rho)
+    print *, "numpy", ierror
+    ierror = ndarray_create(py_grho, grho)
+    ierror = ndarray_create(py_tau, tau)
+    ierror = ndarray_create(py_feat, feat)
+    ierror = ndarray_create_nocopy(py_ex, ex)
+    ierror = ndarray_create_nocopy(py_v1x, v1x)
+    ierror = ndarray_create_nocopy(py_v2x, v2x)
+    ierror = ndarray_create_nocopy(py_v3x, v3x)
+    ierror = ndarray_create_nocopy(py_vfeat, vfeat)
+
+    ierror = tuple_create(args,9)
+    ierror = args%setitem(0, py_rho)
+    ierror = args%setitem(1, py_grho)
+    ierror = args%setitem(2, py_tau)
+    ierror = args%setitem(3, py_feat)
+    ierror = args%setitem(4, py_ex)
+    ierror = args%setitem(5, py_v1x)
+    ierror = args%setitem(6, py_v2x)
+    ierror = args%setitem(7, py_v3x)
+    ierror = args%setitem(8, py_vfeat)
+    print *, "args", ierror
+
+    ierror = call_py_noret(cider_py_obj, "get_xc_fortran", args)
+    print *, "call", ierror
+
+    call py_rho%destroy
+    call py_grho%destroy
+    call py_tau%destroy
+    call py_feat%destroy
+    call py_ex%destroy
+    call py_v1x%destroy
+    call py_v2x%destroy
+    call py_v3x%destroy
+    call py_vfeat%destroy
+
+    allocate( rho_tot(length) )
+    x43 = 1.33333333333333333333333_DP
+    x13 = 0.33333333333333333333333_DP
+    xf = 0.1_DP !* SQRT(4 * 3.141592653)
+    vfeat = 0.0_DP
+    rho_tot = 0.0_DP
+    !
+    ! TODO spin polarization requires different factors for nsp/sp
+    do is = 1, ns
+        rho_tot = rho_tot + rho(:,is)
+    enddo
+    if (ns==1) then
+        do k = 1, length
+            sgn = SIGN(1.0_dp, rho(k,1))
+            rval = abs(rho(k,1))
+            ex(k) = ex(k) + 2 * xf * feat(k,1,1)/2.0_dp * (rval/2.0_dp)**x43 * sgn
+            v1x(k,1) = v1x(k,1) + xf * feat(k,1,1)/2.0_dp * x43 * (rval/2.0_dp)**x13
+            vfeat(k,1,1) = vfeat(k,1,1) + xf * (rval/2.0_dp)**x43
+        enddo
+    else
+        do k = 1, length
+            do is=1,ns
+                sgn = SIGN(1.0_dp, rho(k,1))
+                ex(k) = ex(k) + xf * feat(k,1,is) * abs(rho(k,is))**x43 * sgn
+                v1x(k,is) = v1x(k,is) + xf * feat(k,is,1) * x43 * abs(rho(k,is))**x13
+                vfeat(k,1,is) = vfeat(k,1,is) + xf * abs(rho(k,is))**x43
+            enddo
+        enddo
+    endif
+    !
+    return
+    !
+END SUBROUTINE xc_cider_x_py

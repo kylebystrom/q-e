@@ -28,6 +28,7 @@ MODULE input_parameters
 !!  Originally written by Carlo Cavazzoni for FPMD.
 !=----------------------------------------------------------------------------=!
   !
+  USE forpy_mod
   USE kinds,      ONLY : DP
   USE parameters, ONLY : nsx, natx, sc_size
   USE wannier_new,ONLY : wannier_data
@@ -174,6 +175,7 @@ MODULE input_parameters
         REAL(DP), ALLOCATABLE :: cider_params(:)
         REAL(DP), ALLOCATABLE :: cider_consts(:,:)
         INTEGER,  ALLOCATABLE :: lm_list(:), l_list(:), a_list(:)
+        TYPE(OBJECT) :: cider_py_obj
         !REAL(DP) :: params(5)
 
         REAL(DP) :: refg = 0.05_DP

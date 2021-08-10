@@ -229,7 +229,7 @@ SUBROUTINE iosys()
                                cider_param_dir, cider_param_file,              &
                                cider_params, cider_nbas, cider_nfeat,          &
                                lm_list, l_list, a_list, cider_consts,          &
-                               cider_lmax, cider_nl, cider_nalpha
+                               cider_lmax, cider_nl, cider_nalpha, cider_py_obj
 
   !
   ! ... SYSTEM namelist
@@ -346,7 +346,7 @@ SUBROUTINE iosys()
   INTEGER :: iset, ind, mind, cider_nfeat_sets, ialpha, ierror
   INTEGER, ALLOCATABLE :: cider_ls(:), ialphas(:), cider_feat_inds(:)
   !
-  type(module_py) :: mldftat
+  type(module_py) :: ciderpy
   !
   ! MAIN CONTROL VARIABLES, MD AND RELAX
   !
@@ -395,7 +395,10 @@ SUBROUTINE iosys()
      enddo
      DEALLOCATE( cider_ls )
      ierror = forpy_initialize()
-     ierror = import_py(mldftat, "mldftdat.density")
+     print *,"Init Python",ierror
+     ierror = import_py(ciderpy, "mldftdat.dft.qe_interface")
+     print *,"Load cider",ierror
+     ierror = call_py(cider_py_obj, ciderpy, "init_pyfort")
   END SELECT
   !
   SELECT CASE( trim( calculation ) )
