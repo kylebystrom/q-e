@@ -166,7 +166,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   USE constants,        ONLY : e2, eps8, pi
   USE input_parameters, ONLY : cider_consts, cider_nalpha, cider_nfeat, &
                                cider_lmax, cider_nl, cider_nbas, &
-                               a_list, l_list, lm_list
+                               a_list, l_list, lm_list, cider_params
   USE io_global,        ONLY : stdout
   USE fft_base,         ONLY : dfftp
   USE gvect,            ONLY : g, gg, ngm
@@ -268,6 +268,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   vexp(:,:,:) = zero
   vbas(:,:,:,:) = zero
   vfeat(:,:,:) = zero
+  h(:,:,:) = zero
   !
   IF (nspin == 2) THEN
     CALL rhoz_or_updw( rho, 'both', '->updw' )
@@ -326,9 +327,13 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ! TODO problems for nspin>2
   CALL xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
                      v1x, v2x, v3x, v1c, v2c, v3c )
+  ex = ex * (1 - cider_params(3))
+  v1x = v1x * (1 - cider_params(3))
+  v2x = v2x * (1 - cider_params(3))
+  v3x = v3x * (1 - cider_params(3))
   CALL xc_cider_x_py( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
                       rho%kin_r/e2, feat, ex, &
-                      v1x, v2x, v3x, vfeat )
+                      v1x, v2x, v3x, vfeat, h )
   !
   DO is=1,nspin
     !
@@ -368,7 +373,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
        v(k,1) = (v1x(k,1)+v1c(k,1)) * e2
        !
        ! h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
-       h(:,k,1) = (v2x(k,1)+v2c(1,k,1)) * grho(:,k,1) * e2 
+       h(:,k,1) = h(:,k,1) * e2 + (v2x(k,1)+v2c(1,k,1)) * grho(:,k,1) * e2 
        !
        kedtaur(k,1) = (v3x(k,1)+v3c(k,1)) * 0.5d0 * e2
        !
@@ -390,8 +395,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
        !
        ! h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
        !
-       h(:,k,1) = (v2x(k,1) * grho(:,k,1) + v2c(:,k,1)) * e2
-       h(:,k,2) = (v2x(k,2) * grho(:,k,2) + v2c(:,k,2)) * e2
+       h(:,k,1) = h(:,k,1) + (v2x(k,1) * grho(:,k,1) + v2c(:,k,1)) * e2
+       h(:,k,2) = h(:,k,2) + (v2x(k,2) * grho(:,k,2) + v2c(:,k,2)) * e2
        !
        kedtaur(k,1) = (v3x(k,1) + v3c(k,1)) * 0.5d0 * e2
        kedtaur(k,2) = (v3x(k,2) + v3c(k,2)) * 0.5d0 * e2
@@ -1855,7 +1860,7 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
   DO ig = 1, ngm
      !
      fac = (pi/aexp)**1.5 * EXP(-gg(ig) * tpiba2 / (4.D0 * aexp))
-     fac = fac * (gg(ig) / (4 * aexp * aexp))**(DBLE(l)/2.0_DP) * ylm(ig) ! real sph_harm
+     fac = fac * (gg(ig) * tpiba2 / (4 * aexp * aexp))**(DBLE(l)/2.0_DP) * ylm(ig) ! real sph_harm
      !
      rgtot_re = REAL(  rhog(ig) )
      rgtot_im = AIMAG( rhog(ig) )
@@ -1955,7 +1960,7 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
   DO ig = 1, ngm
      !
      fac = (pi/aexp)**1.5 * EXP(-gg(ig) * tpiba2 / (4.D0 * aexp))
-     fac = fac * (gg(ig) / (4 * aexp * aexp))**(DBLE(l)/2.0_DP) * ylm(ig) ! real sph_harm
+     fac = fac * (gg(ig) * tpiba2 / (4 * aexp * aexp))**(DBLE(l)/2.0_DP) * ylm(ig) ! real sph_harm
      !
      rgtot_re = REAL(  vg(ig) )
      rgtot_im = AIMAG( vg(ig) )
@@ -2142,12 +2147,13 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
   return
 END SUBROUTINE get_cider_lpot_exp
 !
-SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v2x, v3x, vfeat )
+SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
+                         feat, ex, v1x, v2x, v3x, vfeat, h )
     !
     USE forpy_mod
     !
     USE kind_l,        ONLY: DP
-    USE input_parameters, ONLY: cider_py_obj
+    USE input_parameters, ONLY: cider_py_obj, cider_params
     !
     IMPLICIT NONE
     !
@@ -2162,17 +2168,17 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v
     real(dp), intent(inout) :: ex(length)
     real(dp), intent(inout) :: v1x(length,ns)
     real(dp), intent(inout) :: v2x(length,ns)
-    real(dp), intent(inout) :: v3x(length,ns)
+    real(dp), intent(inout):: v3x(length,ns)
     real(dp), intent(out) :: vfeat(length,nfeat,ns)
+    real(dp), intent(out) :: h(3,length,ns)
     !
     integer :: is,k,sgn,ierror
     real(dp) :: x43,x13
     real(dp) :: xf,rval
-    real(dp), allocatable :: grho2(:,:)
-    real(dp), allocatable :: rho_tot(:)
 
     type(tuple) :: args
-    type(ndarray) :: py_rho, py_grho, py_tau, py_feat, py_ex, py_v1x, py_v2x, py_v3x, py_vfeat
+    type(ndarray) :: py_rho, py_grho, py_tau, py_feat, py_ex, &
+                     py_v1x, py_v2x, py_v3x, py_vfeat, py_h
 
     ierror = forpy_initialize()
     print *, "init", ierror
@@ -2187,8 +2193,9 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v
     ierror = ndarray_create_nocopy(py_v2x, v2x)
     ierror = ndarray_create_nocopy(py_v3x, v3x)
     ierror = ndarray_create_nocopy(py_vfeat, vfeat)
+    ierror = ndarray_create_nocopy(py_h, h)
 
-    ierror = tuple_create(args,9)
+    ierror = tuple_create(args,11)
     ierror = args%setitem(0, py_rho)
     ierror = args%setitem(1, py_grho)
     ierror = args%setitem(2, py_tau)
@@ -2198,6 +2205,8 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v
     ierror = args%setitem(6, py_v2x)
     ierror = args%setitem(7, py_v3x)
     ierror = args%setitem(8, py_vfeat)
+    ierror = args%setitem(9, cider_params(3))
+    ierror = args%setitem(10, py_h)
     print *, "args", ierror
 
     ierror = call_py_noret(cider_py_obj, "get_xc_fortran", args)
@@ -2212,36 +2221,38 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, feat, ex, v1x, v
     call py_v2x%destroy
     call py_v3x%destroy
     call py_vfeat%destroy
+    call py_h%destroy
 
-    allocate( rho_tot(length) )
-    x43 = 1.33333333333333333333333_DP
-    x13 = 0.33333333333333333333333_DP
-    xf = 0.1_DP !* SQRT(4 * 3.141592653)
-    vfeat = 0.0_DP
-    rho_tot = 0.0_DP
+    !allocate( rho_tot(length) )
+    !x43 = 1.33333333333333333333333_DP
+    !x13 = 0.33333333333333333333333_DP
+    !xf = 0.1_DP !* SQRT(4 * 3.141592653)
+    !vfeat = 0.0_DP
+    !rho_tot = 0.0_DP
     !
     ! TODO spin polarization requires different factors for nsp/sp
-    do is = 1, ns
-        rho_tot = rho_tot + rho(:,is)
-    enddo
-    if (ns==1) then
-        do k = 1, length
-            sgn = SIGN(1.0_dp, rho(k,1))
-            rval = abs(rho(k,1))
-            ex(k) = ex(k) + 2 * xf * feat(k,1,1)/2.0_dp * (rval/2.0_dp)**x43 * sgn
-            v1x(k,1) = v1x(k,1) + xf * feat(k,1,1)/2.0_dp * x43 * (rval/2.0_dp)**x13
-            vfeat(k,1,1) = vfeat(k,1,1) + xf * (rval/2.0_dp)**x43
-        enddo
-    else
-        do k = 1, length
-            do is=1,ns
-                sgn = SIGN(1.0_dp, rho(k,1))
-                ex(k) = ex(k) + xf * feat(k,1,is) * abs(rho(k,is))**x43 * sgn
-                v1x(k,is) = v1x(k,is) + xf * feat(k,is,1) * x43 * abs(rho(k,is))**x13
-                vfeat(k,1,is) = vfeat(k,1,is) + xf * abs(rho(k,is))**x43
-            enddo
-        enddo
-    endif
+    !
+    !do is = 1, ns
+    !    rho_tot = rho_tot + rho(:,is)
+    !enddo
+    !if (ns==1) then
+    !    do k = 1, length
+    !        sgn = SIGN(1.0_dp, rho(k,1))
+    !        rval = abs(rho(k,1))
+    !        ex(k) = ex(k) + 2 * xf * feat(k,1,1)/2.0_dp * (rval/2.0_dp)**x43 * sgn
+    !        v1x(k,1) = v1x(k,1) + xf * feat(k,1,1)/2.0_dp * x43 * (rval/2.0_dp)**x13
+    !        vfeat(k,1,1) = vfeat(k,1,1) + xf * (rval/2.0_dp)**x43
+    !    enddo
+    !else
+    !    do k = 1, length
+    !        do is=1,ns
+    !            sgn = SIGN(1.0_dp, rho(k,1))
+    !            ex(k) = ex(k) + xf * feat(k,1,is) * abs(rho(k,is))**x43 * sgn
+    !            v1x(k,is) = v1x(k,is) + xf * feat(k,is,1) * x43 * abs(rho(k,is))**x13
+    !            vfeat(k,1,is) = vfeat(k,1,is) + xf * abs(rho(k,is))**x43
+    !        enddo
+    !    enddo
+    !endif
     !
     return
     !
