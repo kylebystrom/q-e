@@ -171,10 +171,11 @@ MODULE input_parameters
         ! specify which file to use for parameters of custom model
 
         ! parameters for custom model, not to be included in the namelist
-        INTEGER :: cider_nbas,cider_nfeat,cider_lmax,cider_nl,cider_nalpha
+        INTEGER :: cider_nbas,cider_nfeat,cider_lmax,cider_nl,cider_nalpha,cider_nset
         REAL(DP), ALLOCATABLE :: cider_params(:)
         REAL(DP), ALLOCATABLE :: cider_consts(:,:)
-        INTEGER,  ALLOCATABLE :: lm_list(:), l_list(:), a_list(:)
+        INTEGER,  ALLOCATABLE :: lm_list(:), l_list(:), a_list(:), &
+                                 isets(:),cider_ls(:),ialphas(:)
         TYPE(OBJECT) :: cider_py_obj
         !REAL(DP) :: params(5)
 

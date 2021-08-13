@@ -74,6 +74,7 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   ! ... calculate exchange-correlation potential
   !
   IF (xclib_get_id('LDA', 'EXCH') == -1) then
+     print *,"Calling v_xc_cider"
      CALL v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
   ELSEIF (xclib_dft_is('meta')) then
      CALL v_xc_meta( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
@@ -166,7 +167,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   USE constants,        ONLY : e2, eps8, pi
   USE input_parameters, ONLY : cider_consts, cider_nalpha, cider_nfeat, &
                                cider_lmax, cider_nl, cider_nbas, &
-                               a_list, l_list, lm_list, cider_params
+                               a_list, l_list, lm_list, cider_params, &
+                               cider_nset, cider_ls, ialphas, isets
   USE io_global,        ONLY : stdout
   USE fft_base,         ONLY : dfftp
   USE gvect,            ONLY : g, gg, ngm
@@ -227,7 +229,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   COMPLEX(DP), ALLOCATABLE :: rhogsum(:)
   REAL(DP), PARAMETER :: eps12 = 1.0d-12, zero=0._dp
   !
-  INTEGER :: ialpha, ifeat, l, lmind, ibas, m
+  INTEGER :: ialpha, ifeat, l, lmind, ibas, m, iset
   !
   CALL start_clock( 'v_xc_cider' )
   !
@@ -253,9 +255,9 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ALLOCATE( bas(dfftp%nnr,cider_nbas,cider_nl,nspin) )
   ALLOCATE( vbas(dfftp%nnr,cider_nbas,cider_nl,nspin) )
   ALLOCATE( vexp(dfftp%nnr,cider_nalpha,nspin) )
-  ALLOCATE( fc(dfftp%nnr,cider_nbas,cider_nalpha,nspin) )
-  ALLOCATE( fc2(dfftp%nnr,cider_nbas,cider_nalpha,nspin) )
-  ALLOCATE( dfc(dfftp%nnr,cider_nbas,cider_nalpha,nspin) )
+  ALLOCATE( fc(dfftp%nnr,cider_nbas,cider_nset,nspin) )
+  ALLOCATE( fc2(dfftp%nnr,cider_nbas,cider_nset,nspin) )
+  ALLOCATE( dfc(dfftp%nnr,cider_nbas,cider_nset,nspin) )
   ALLOCATE( ylm(ngm,cider_nl) )
   ALLOCATE( cider_exp(dfftp%nnr,cider_nalpha,nspin) )
   ALLOCATE( const(dfftp%nnr,cider_nfeat,nspin) )
@@ -273,6 +275,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   IF (nspin == 2) THEN
     CALL rhoz_or_updw( rho, 'both', '->updw' )
   ENDIF
+  !
   !
   DO is = 1, nspin
     !
@@ -293,8 +296,13 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
     do ialpha=1,cider_nalpha
       CALL get_cider_alpha( dfftp%nnr, rho%of_r(:,is), grho(:,:,is), rho%kin_r(:,is)/e2, &
                             cider_consts(:,ialpha), cider_exp(:,ialpha,is) )
-      CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is), &
-                            fc(:,:,ialpha,is), dfc(:,:,ialpha,is) )
+    enddo
+    do iset=1,cider_nset
+      l = cider_ls(iset)
+      ialpha = ialphas(iset)
+      print *,l,ialpha,iset
+      CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is), l, &
+                            fc(:,:,iset,is), dfc(:,:,iset,is) )
       !CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is)+1e-8, &
       !                      fc2(:,:,ialpha,is), dfc(:,:,ialpha,is) )
     enddo
@@ -302,14 +310,15 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       l = l_list(ifeat)
       lmind = lm_list(ifeat)
       ialpha = a_list(ifeat)
+      iset = isets(ifeat)
       const(:,ifeat,is) = cider_consts(2,ialpha)**1.5_DP &
                           * SQRT(4*pi**(1-l))  &
                           * (8*pi/3)**(l/3.0) * cider_exp(:,ialpha,is)**(l/2.0)
       const(:,ifeat,is) = cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const(:,ifeat,is)) &
                           + const(:,ifeat,is)
-      feat(:,ifeat,is) = SUM(fc(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
+      feat(:,ifeat,is) = SUM(fc(:,:,iset,is) * bas(:,:,lmind,is), 2)
       feat(:,ifeat,is) = feat(:,ifeat,is) * const(:,ifeat,is)
-      dfeat(:,ifeat,is) = SUM(dfc(:,:,ialpha,is) * bas(:,:,lmind,is), 2) * const(:,ifeat,is)
+      dfeat(:,ifeat,is) = SUM(dfc(:,:,iset,is) * bas(:,:,lmind,is), 2) * const(:,ifeat,is)
       dfeat(:,ifeat,is) = dfeat(:,ifeat,is) + feat(:,ifeat,is) &
                           * DBLE(l) / (2.0 * cider_exp(:,ialpha,is))
 
@@ -341,10 +350,11 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       lmind = lm_list(ifeat)
       l = l_list(ifeat)
       ialpha = a_list(ifeat)
+      iset = isets(ifeat)
       vexp(:,ialpha,is) = vexp(:,ialpha,is) + vfeat(:,ifeat,is) * dfeat(:,ifeat,is)
       do ibas=1,cider_nbas
         vbas(:,ibas,lmind,is) = vbas(:,ibas,lmind,is) + const(:,ifeat,is) &
-                                * vfeat(:,ifeat,is) * fc(:,ibas,ialpha,is)
+                                * vfeat(:,ifeat,is) * fc(:,ibas,iset,is)
       enddo
     enddo
     !
@@ -2017,7 +2027,7 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
 END SUBROUTINE get_cider_lpot_bas
 !
 !
-SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
+SUBROUTINE get_cider_coefs( length, cider_exp, l, fc, dfc )
     !
     ! Takes CIDER auxiliary basis features as input, along with
     ! CIDER exponents, and returns the basis-transformed version
@@ -2030,6 +2040,7 @@ SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     !
     integer, intent(in)   :: length
     real(dp), intent(in)  :: cider_exp(length)
+    integer, intent(in)   :: l
     real(dp), intent(out) :: fc(length,cider_nbas)
     real(dp), intent(out) :: dfc(length,cider_nbas)
     !
@@ -2038,7 +2049,7 @@ SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     real(dp), allocatable :: sinv(:,:)
     real(dp), allocatable :: cvec(:,:)
     real(dp), allocatable :: dcvec(:,:)
-    real(dp)              :: cider_maxexp, cider_xexp
+    real(dp)              :: cider_maxexp, cider_xexp, power
     !
     allocate ( bas_exp(cider_nbas) )
     allocate ( sinv(cider_nbas, cider_nbas) )
@@ -2047,12 +2058,15 @@ SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     cider_maxexp = cider_params(1)
     cider_xexp = cider_params(2)
     !
+    power = -1.5_dp - DBLE(l)
+    !
     do i=1,cider_nbas
         bas_exp(i) = cider_maxexp / cider_xexp**(i-1)
     enddo
     do i=1,cider_nbas
         do j=1,cider_nbas
-            sinv(i,j) = sqrt( pi / (bas_exp(i) + bas_exp(j)) )**3.0_DP !/ (4 * pi)
+            !sinv(i,j) = sqrt( pi / (bas_exp(i) + bas_exp(j)) )**3.0_DP
+            sinv(i,j) = (bas_exp(i) + bas_exp(j))**power
         enddo
     enddo
     !
@@ -2061,8 +2075,8 @@ SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     !
     do i=1,length
         do j=1,cider_nbas
-            cvec(i,j) = sqrt( pi / (cider_exp(i) + bas_exp(j)) )**3.0_DP !/ (4 * pi)
-            dcvec(i,j) = -1.5_dp * cvec(i,j) / (cider_exp(i) + bas_exp(j))
+            cvec(i,j) = (cider_exp(i) + bas_exp(j))**power
+            dcvec(i,j) = power * cvec(i,j) / (cider_exp(i) + bas_exp(j))
         enddo
     enddo
     !

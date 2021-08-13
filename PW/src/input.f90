@@ -229,7 +229,8 @@ SUBROUTINE iosys()
                                cider_param_dir, cider_param_file,              &
                                cider_params, cider_nbas, cider_nfeat,          &
                                lm_list, l_list, a_list, cider_consts,          &
-                               cider_lmax, cider_nl, cider_nalpha, cider_py_obj
+                               cider_lmax, cider_nl, cider_nalpha,             &
+                               cider_py_obj, cider_nset, cider_ls, ialphas, isets
 
   !
   ! ... SYSTEM namelist
@@ -343,8 +344,8 @@ SUBROUTINE iosys()
   CHARACTER(len=256) :: tempfile
   !
   ! VARIABLES FOR CIDER INPUT READ
-  INTEGER :: iset, ind, mind, cider_nfeat_sets, ialpha, ierror
-  INTEGER, ALLOCATABLE :: cider_ls(:), ialphas(:), cider_feat_inds(:)
+  INTEGER :: iset, ind, mind, ialpha, ierror
+  INTEGER, ALLOCATABLE :: cider_feat_inds(:)
   !
   type(module_py) :: ciderpy
   !
@@ -363,12 +364,12 @@ SUBROUTINE iosys()
      cider_param_fname = TRIM(cider_param_dir) // TRIM(cider_param_file)
      OPEN(unit=99, file=cider_param_fname, action='read')
      ALLOCATE(cider_params(3))
-     READ(99,*) cider_nbas, cider_nfeat_sets, cider_params
+     READ(99,*) cider_nbas, cider_nset, cider_params
      READ(99,*) cider_lmax, cider_nalpha
      ALLOCATE ( cider_consts(4,cider_nalpha) )
-     ALLOCATE ( cider_ls(cider_nfeat_sets) )
-     ALLOCATE ( ialphas(cider_nfeat_sets) )
-     ALLOCATE ( cider_feat_inds(cider_nfeat_sets) )
+     ALLOCATE ( cider_ls(cider_nset) )
+     ALLOCATE ( ialphas(cider_nset) )
+     ALLOCATE ( cider_feat_inds(cider_nset) )
      do ialpha=1,cider_nalpha
         ! cider consts has shape (4,nalpha)
         ! const a0 fac_mul amin
@@ -376,7 +377,7 @@ SUBROUTINE iosys()
      enddo
      cider_nl = (cider_lmax + 1) * (cider_lmax + 1)
      cider_nfeat = 0
-     do iset=1,cider_nfeat_sets
+     do iset=1,cider_nset
         READ(99,*) cider_ls(iset), ialphas(iset)
         cider_feat_inds(iset) = cider_nfeat + 1
         cider_nfeat = cider_nfeat + 2 * cider_ls(iset) + 1
@@ -385,15 +386,16 @@ SUBROUTINE iosys()
      ALLOCATE( lm_list(cider_nfeat) )
      ALLOCATE( l_list(cider_nfeat) )
      ALLOCATE( a_list(cider_nfeat) )
-     do iset=1,cider_nfeat_sets
+     ALLOCATE( isets(cider_nfeat) )
+     do iset=1,cider_nset
         do mind=1,2*cider_ls(iset)+1
           ind = cider_feat_inds(iset) + mind - 1
           lm_list(ind) = cider_ls(iset) * cider_ls(iset) + mind
           l_list(ind) = cider_ls(iset)
           a_list(ind) = ialphas(iset)
+          isets(ind) = iset
         enddo
      enddo
-     DEALLOCATE( cider_ls )
      ierror = forpy_initialize()
      print *,"Init Python",ierror
      ierror = import_py(ciderpy, "mldftdat.dft.qe_interface")
