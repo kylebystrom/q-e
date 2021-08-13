@@ -359,6 +359,9 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       lmind=1
       do l=0,cider_lmax
         do m=-l,l
+          IF (MOD(l,2)==1) THEN
+            vbas(:,ibas,lmind,is) = -1.0_DP * vbas(:,ibas,lmind,is)
+          ENDIF
           CALL get_cider_lpot_bas( vbas(:,ibas,lmind,is), ylm(:,lmind), &
                                    l, ibas, v1x(:,is) )
           lmind=lmind+1
@@ -395,8 +398,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
        !
        ! h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
        !
-       h(:,k,1) = h(:,k,1) + (v2x(k,1) * grho(:,k,1) + v2c(:,k,1)) * e2
-       h(:,k,2) = h(:,k,2) + (v2x(k,2) * grho(:,k,2) + v2c(:,k,2)) * e2
+       h(:,k,1) = h(:,k,1) * e2 + (v2x(k,1) * grho(:,k,1) + v2c(:,k,1)) * e2
+       h(:,k,2) = h(:,k,2) * e2 + (v2x(k,2) * grho(:,k,2) + v2c(:,k,2)) * e2
        !
        kedtaur(k,1) = (v3x(k,1) + v3c(k,1)) * 0.5d0 * e2
        kedtaur(k,2) = (v3x(k,2) + v3c(k,2)) * 0.5d0 * e2
@@ -1874,11 +1877,19 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
   ! 
   aux(:) = 0.D0
   !
-  aux(dfftp%nl(1:ngm)) = CMPLX( aux1(1,1:ngm), aux1(2,1:ngm), KIND=dp )
+  IF (MOD(l,4)==0) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(1,1:ngm),  aux1(2,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==1) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(2,1:ngm),  aux1(1,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==2) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+  ELSE
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(2,1:ngm), -aux1(1,1:ngm), KIND=dp )
+  ENDIF
   !
   IF ( gamma_only ) THEN
      !
-     aux(dfftp%nlm(1:ngm)) = CMPLX( aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+     aux(dfftp%nlm(1:ngm)) = CONJG ( aux(dfftp%nl(1:ngm)) )
      !
   END IF
   !
@@ -1973,11 +1984,19 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
   ! 
   aux(:) = 0.D0
   !
-  aux(dfftp%nl(1:ngm)) = CMPLX( aux1(1,1:ngm), aux1(2,1:ngm), KIND=dp )
+  IF (MOD(l,4)==0) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(1,1:ngm),  aux1(2,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==1) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(2,1:ngm),  aux1(1,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==2) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+  ELSE
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(2,1:ngm), -aux1(1,1:ngm), KIND=dp )
+  ENDIF
   !
   IF ( gamma_only ) THEN
      !
-     aux(dfftp%nlm(1:ngm)) = CMPLX( aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+     aux(dfftp%nlm(1:ngm)) = CONJG ( aux(dfftp%nl(1:ngm)) )
      !
   END IF
   !
@@ -2033,7 +2052,7 @@ SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     enddo
     do i=1,cider_nbas
         do j=1,cider_nbas
-            sinv(i,j) = sqrt( pi / (bas_exp(i) + bas_exp(j)) )**3.0_DP / (4 * pi)
+            sinv(i,j) = sqrt( pi / (bas_exp(i) + bas_exp(j)) )**3.0_DP !/ (4 * pi)
         enddo
     enddo
     !
@@ -2042,7 +2061,7 @@ SUBROUTINE get_cider_coefs( length, cider_exp, fc, dfc )
     !
     do i=1,length
         do j=1,cider_nbas
-            cvec(i,j) = sqrt( pi / (cider_exp(i) + bas_exp(j)) )**3.0_DP / (4 * pi)
+            cvec(i,j) = sqrt( pi / (cider_exp(i) + bas_exp(j)) )**3.0_DP !/ (4 * pi)
             dcvec(i,j) = -1.5_dp * cvec(i,j) / (cider_exp(i) + bas_exp(j))
         enddo
     enddo
