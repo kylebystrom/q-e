@@ -276,7 +276,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   !
   DO is = 1, nspin
     !
-    rhogsum(:) = fac*rhog_core(:) + rho%of_g(:,is) ! rhoz is transformed to updw above
+    !rhogsum(:) = fac*rhog_core(:) + rho%of_g(:,is) ! rhoz is transformed to updw above
+    rhogsum(:) = rho%of_g(:,is) ! rhoz is transformed to updw above
     !
     CALL fft_gradient_g2r( dfftp, rhogsum, g, grho(1,1,is) )
     !
@@ -285,6 +286,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       do l=0,cider_lmax
         do m=-l,l
           CALL get_cider_bas( rhogsum, bas(:,ibas,lmind,is), ylm(:,lmind), l, ibas )
+          !print *, "make bas", l,m,lmind, MAXVAL(ABS(bas(:,ibas,lmind,is)))
           lmind=lmind+1
         enddo
       enddo
@@ -303,8 +305,9 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       lmind = lm_list(ifeat)
       ialpha = a_list(ifeat)
       const(:,ifeat,is) = cider_consts(2,ialpha)**1.5_DP &
-                          * SQRT(4*pi**(1-l))  &
-                          * (8*pi/3)**(l/3.0) * cider_exp(:,ialpha,is)**(l/2.0)
+                          * SQRT(4.0*pi**(1-DBLE(l)))  &
+                          * (8.0*pi/3.0)**(DBLE(l)/3.0) &
+                          * cider_exp(:,ialpha,is)**(DBLE(l)/2.0)
       const(:,ifeat,is) = cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const(:,ifeat,is)) &
                           + const(:,ifeat,is)
       feat(:,ifeat,is) = SUM(fc(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
@@ -312,7 +315,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       dfeat(:,ifeat,is) = SUM(dfc(:,:,ialpha,is) * bas(:,:,lmind,is), 2) * const(:,ifeat,is)
       dfeat(:,ifeat,is) = dfeat(:,ifeat,is) + feat(:,ifeat,is) &
                           * DBLE(l) / (2.0 * cider_exp(:,ialpha,is))
-
+      print *, "make feat", l,lmind,ialpha,ifeat,MAXVAL(feat(:,ifeat,is))
       !dfeat(:,ifeat,is) = SUM(fc2(:,:,ialpha,is) * bas(:,:,lmind,is), 2)
       !dfeat(:,ifeat,is) = dfeat(:,ifeat,is) * const(:,ifeat,is)
       !dfeat(:,ifeat,is) = (dfeat(:,ifeat,is) - feat(:,ifeat,is)) / 1e-8
@@ -323,18 +326,20 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ENDDO
   !
   DEALLOCATE(rhogsum)
+  print *,"before xc add", MAXVAL(vbas)
   !
   ! TODO problems for nspin>2
   CALL xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
                      v1x, v2x, v3x, v1c, v2c, v3c )
-  ex = ex * (1 - cider_params(3))
-  v1x = v1x * (1 - cider_params(3))
-  v2x = v2x * (1 - cider_params(3))
-  v3x = v3x * (1 - cider_params(3))
-  CALL xc_cider_x_py( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
+  !ex = ex * (1 - cider_params(3))
+  !v1x = v1x * (1 - cider_params(3))
+  !v2x = v2x * (1 - cider_params(3))
+  !v3x = v3x * (1 - cider_params(3))
+  CALL xc_cider_x( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
                       rho%kin_r/e2, feat, ex, &
                       v1x, v2x, v3x, vfeat, h )
   !
+  print *,"before vfeat add", MAXVAL(vbas)
   DO is=1,nspin
     !
     do ifeat=1,cider_nfeat
@@ -348,6 +353,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       enddo
     enddo
     !
+    print *,"after vfeat add", MAXVAL(vbas)
     do ialpha=1,cider_nalpha
       CALL get_cider_lpot_exp( dfftp%nnr, rho%of_r(:,is), &
                                grho(:,:,is), rho%kin_r(:,is)/e2, &
@@ -355,12 +361,17 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
                                vexp(:,ialpha,is), v1x(:,is), &
                                v2x(:,is), v3x(:,is) )
     enddo
+    print *,"after lpot exp", MAXVAL(vbas)
     do ibas=1,cider_nbas
       lmind=1
       do l=0,cider_lmax
         do m=-l,l
+          IF (MOD(l,2)==1) THEN
+            vbas(:,ibas,lmind,is) = -1.0_DP * vbas(:,ibas,lmind,is)
+          ENDIF
           CALL get_cider_lpot_bas( vbas(:,ibas,lmind,is), ylm(:,lmind), &
                                    l, ibas, v1x(:,is) )
+          !print *, "maxvbas", ibas,l,m,MOD(l,2),MAXVAL(vbas(:,ibas,lmind,is)), MAXVAL(vbas)
           lmind=lmind+1
         enddo
       enddo
@@ -395,8 +406,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
        !
        ! h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
        !
-       h(:,k,1) = h(:,k,1) + (v2x(k,1) * grho(:,k,1) + v2c(:,k,1)) * e2
-       h(:,k,2) = h(:,k,2) + (v2x(k,2) * grho(:,k,2) + v2c(:,k,2)) * e2
+       h(:,k,1) = h(:,k,1) * e2 + (v2x(k,1) * grho(:,k,1) + v2c(:,k,1)) * e2
+       h(:,k,2) = h(:,k,2) * e2 + (v2x(k,2) * grho(:,k,2) + v2c(:,k,2)) * e2
        !
        kedtaur(k,1) = (v3x(k,1) + v3c(k,1)) * 0.5d0 * e2
        kedtaur(k,2) = (v3x(k,2) + v3c(k,2)) * 0.5d0 * e2
@@ -1845,6 +1856,7 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
   COMPLEX(DP), ALLOCATABLE :: aux(:), rgtot(:), vaux(:)
   INTEGER               :: nt
   REAL(DP)              :: aexp
+  REAL(DP)              :: sgn, mfac
   !
   CALL start_clock( 'get_cider_bas' )
   !
@@ -1856,6 +1868,13 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
   !aexp = 0.2
   aexp = cider_params(1) / cider_params(2)**(ibas-1)
   !
+  IF (MOD(l,2)==0) THEN
+    sgn = 1.0_DP
+  ELSE
+    sgn = -1.0_DP
+  ENDIF
+  !
+  mfac=0.0_DP
 !$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
      !
@@ -1870,15 +1889,22 @@ SUBROUTINE get_cider_bas( rhog, feat, ylm, l, ibas )
      !
   ENDDO
 !$omp end parallel do
-  !
   ! 
   aux(:) = 0.D0
   !
-  aux(dfftp%nl(1:ngm)) = CMPLX( aux1(1,1:ngm), aux1(2,1:ngm), KIND=dp )
+  IF (MOD(l,4)==0) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(1,1:ngm),  aux1(2,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==1) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(2,1:ngm),  aux1(1,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==2) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+  ELSE
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(2,1:ngm), -aux1(1,1:ngm), KIND=dp )
+  ENDIF
   !
   IF ( gamma_only ) THEN
      !
-     aux(dfftp%nlm(1:ngm)) = CMPLX( aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+     aux(dfftp%nlm(1:ngm)) = CONJG ( aux(dfftp%nl(1:ngm)) )
      !
   END IF
   !
@@ -1934,6 +1960,7 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
   COMPLEX(DP), ALLOCATABLE :: aux(:), rgtot(:), vaux(:)
   INTEGER               :: nt
   REAL(DP)              :: aexp
+  REAL(DP)              :: sgn
   !
   CALL start_clock( 'get_cider_lpot_bas' )
   !
@@ -1956,6 +1983,12 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
   !aexp = 0.2
   aexp = cider_params(1) / cider_params(2)**(ibas-1)
   !
+  IF (MOD(l,2)==0) THEN
+    sgn = 1.0_DP
+  ELSE
+    sgn = -1.0_DP
+  ENDIF
+  !
 !$omp parallel do private( fac, rgtot_re, rgtot_im )
   DO ig = 1, ngm
      !
@@ -1973,11 +2006,19 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
   ! 
   aux(:) = 0.D0
   !
-  aux(dfftp%nl(1:ngm)) = CMPLX( aux1(1,1:ngm), aux1(2,1:ngm), KIND=dp )
+  IF (MOD(l,4)==0) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(1,1:ngm),  aux1(2,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==1) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(2,1:ngm),  aux1(1,1:ngm), KIND=dp )
+  ELSEIF (MOD(l,4)==2) THEN
+    aux(dfftp%nl(1:ngm)) = CMPLX( -aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+  ELSE
+    aux(dfftp%nl(1:ngm)) = CMPLX(  aux1(2,1:ngm), -aux1(1,1:ngm), KIND=dp )
+  ENDIF
   !
   IF ( gamma_only ) THEN
      !
-     aux(dfftp%nlm(1:ngm)) = CMPLX( aux1(1,1:ngm), -aux1(2,1:ngm), KIND=dp )
+     aux(dfftp%nlm(1:ngm)) = CONJG ( aux(dfftp%nl(1:ngm)) )
      !
   END IF
   !
@@ -2069,7 +2110,7 @@ SUBROUTINE get_cider_alpha( length, rho, grho, kin, cider_consts, cider_exp )
 
   integer,  intent(in) :: length
   real(dp), intent(in) :: rho(length)
-  real(dp), intent(in) :: grho(length)
+  real(dp), intent(in) :: grho(3,length)
   real(dp), intent(in) :: kin(length)
   real(dp), intent(in) :: cider_consts(4)
   real(dp), intent(out) :: cider_exp(length)
@@ -2086,7 +2127,9 @@ SUBROUTINE get_cider_alpha( length, rho, grho, kin, cider_consts, cider_exp )
   const1 = const1 * pi / 2**(2.0_DP/3)
   const2 = const2 * pi / 2**(2.0_DP/3)
 
-  cider_exp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
+  !cider_exp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
+  cider_exp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) &
+              + const2 * 0.125 * (grho(1,:)**2 + grho(2,:)**2 + grho(3,:)**2) / (abs(rho)+1e-8)**2
 
   do i=1,length
     if (cider_exp(i) < cider_consts(4)) then
@@ -2106,7 +2149,7 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
 
   integer,  intent(in) :: length
   real(dp), intent(in) :: rho(length)
-  real(dp), intent(in) :: grho(length)
+  real(dp), intent(in) :: grho(3,length)
   real(dp), intent(in) :: kin(length)
   real(dp), intent(in) :: cider_consts(4)
   real(dp), intent(in) :: cider_exp(length)
@@ -2129,7 +2172,9 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
   const2 = const2 * pi / 2**(2.0_DP/3)
 
   allocate(cider_tmp(length))
-  cider_tmp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
+  !cider_tmp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
+  cider_tmp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) &
+              + const2 * 0.125 * (grho(1,:)**2 + grho(2,:)**2 + grho(3,:)**2) / (abs(rho)+1e-8)**2
 
   do i=1,length
     if (cider_tmp(i) < cider_consts(4)) then
@@ -2139,8 +2184,11 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
 
   v1x = v1x + 2.0_DP/3.0_DP * DBLE(ns) * vexp &
               * const1 / (ns*abs(rho)+1e-8)**(1.0_DP/3)
-  v1x = v1x - vexp * const2 * kin / (abs(rho)+1e-8)**2
-  v3x = v3x + vexp * const2 / (abs(rho)+1e-8)
+  !v1x = v1x - vexp * const2 * kin / (abs(rho)+1e-8)**2
+  !v3x = v3x + vexp * const2 / (abs(rho)+1e-8)
+
+  !v1x = v1x - vexp * 0.25 * ((grho(1,:)**2 + grho(2,:)**2 + grho(3,:)**2) / (abs(rho)+1e-8)**2) / (abs(rho) + 1e-6)
+  !v2x = v2x + vexp * 0.25 * SQRT(grho(1,:)**2 + grho(2,:)**2 + grho(3,:)**2) / (abs(rho)+1e-8)**2
 
   DEALLOCATE(cider_tmp)
 
@@ -2175,6 +2223,9 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
     integer :: is,k,sgn,ierror
     real(dp) :: x43,x13
     real(dp) :: xf,rval
+    real(dp), dimension(:,:,:), pointer :: v3
+    real(dp), dimension(:,:), pointer :: v2
+    real(dp), dimension(:), pointer :: v1
 
     type(tuple) :: args
     type(ndarray) :: py_rho, py_grho, py_tau, py_feat, py_ex, &
@@ -2188,12 +2239,12 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
     ierror = ndarray_create(py_grho, grho)
     ierror = ndarray_create(py_tau, tau)
     ierror = ndarray_create(py_feat, feat)
-    ierror = ndarray_create_nocopy(py_ex, ex)
-    ierror = ndarray_create_nocopy(py_v1x, v1x)
-    ierror = ndarray_create_nocopy(py_v2x, v2x)
-    ierror = ndarray_create_nocopy(py_v3x, v3x)
-    ierror = ndarray_create_nocopy(py_vfeat, vfeat)
-    ierror = ndarray_create_nocopy(py_h, h)
+    ierror = ndarray_create(py_ex, ex)
+    ierror = ndarray_create(py_v1x, v1x)
+    ierror = ndarray_create(py_v2x, v2x)
+    ierror = ndarray_create(py_v3x, v3x)
+    ierror = ndarray_create(py_vfeat, vfeat)
+    ierror = ndarray_create(py_h, h)
 
     ierror = tuple_create(args,11)
     ierror = args%setitem(0, py_rho)
@@ -2211,6 +2262,19 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
 
     ierror = call_py_noret(cider_py_obj, "get_xc_fortran", args)
     print *, "call", ierror
+
+    ierror = py_ex%get_data(v1)
+    ex = v1
+    ierror = py_v1x%get_data(v2)
+    v1x = v2
+    ierror = py_v2x%get_data(v2)
+    v2x = v2
+    ierror = py_v3x%get_data(v2)
+    v3x = v2
+    ierror = py_vfeat%get_data(v3)
+    vfeat = v3
+    ierror = py_h%get_data(v3)
+    h = v3
 
     call py_rho%destroy
     call py_grho%destroy
