@@ -73,7 +73,7 @@ libpp.a : $(PPOBJS)
 	$(RANLIB) $@
 
 qexml.x: qexml.o qexml_example.o
-	$(LD) $(LDFLAGS) -o $@ qexml_example.o qexml.o $(QEMODS) $(LIBOBJS)
+	$(LD)  -o $@ qexml_example.o qexml.o $(QEMODS) $(LIBOBJS) $(LDFLAGS)
 
 open_grid.x : open_grid.o libpp.a $(MODULES) $(LIBOBJS)
 	$(LD) $(LDFLAGS) -o $@ \
@@ -86,8 +86,8 @@ average.x : average.o libpp.a $(MODULES) $(LIBOBJS)
 	- ( cd ../../bin ; ln -fs ../PP/src/$@ . )
 
 bands.x : bands.o libpp.a $(MODULES) $(LIBOBJS)
-	$(LD) $(LDFLAGS) -o $@ \
-		bands.o libpp.a $(MODULES) $(LIBOBJS) $(QELIBS)
+	$(LD)  -o $@ \
+		bands.o libpp.a $(MODULES) $(LIBOBJS) $(QELIBS) $(LDFLAGS)
 	- ( cd ../../bin ; ln -fs ../PP/src/$@ . )
 
 dos.x : dos.o libpp.a $(MODULES) $(LIBOBJS)
