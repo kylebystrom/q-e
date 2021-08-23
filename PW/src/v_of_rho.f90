@@ -62,13 +62,6 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   !
   INTEGER :: is, ir
   !
-  !TEST variables
-  real(dp), allocatable :: test_vr(:,:)
-  real(dp), allocatable :: test_vk(:,:)
-  real(dp) :: etxc2
-  allocate(test_vr(dfftp%nnr,nspin))
-  allocate(test_vk(dfftp%nnr,nspin))
-  !
   CALL start_clock( 'v_of_rho' )
   !
   ! ... calculate exchange-correlation potential
@@ -249,6 +242,8 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ALLOCATE( ex(dfftp%nnr), ec(dfftp%nnr) )
   ALLOCATE( v1x(dfftp%nnr,nspin), v2x(dfftp%nnr,nspin)   , v3x(dfftp%nnr,nspin) )
   ALLOCATE( v1c(dfftp%nnr,nspin), v2c(np,dfftp%nnr,nspin), v3c(dfftp%nnr,nspin) )
+  !
+  ! CIDER arrays
   ALLOCATE( feat(dfftp%nnr,cider_nfeat,nspin) )
   ALLOCATE( dfeat(dfftp%nnr,cider_nfeat,nspin) )
   ALLOCATE( vfeat(dfftp%nnr,cider_nfeat,nspin) )
@@ -256,7 +251,6 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   ALLOCATE( vbas(dfftp%nnr,cider_nbas,cider_nl,nspin) )
   ALLOCATE( vexp(dfftp%nnr,cider_nalpha,nspin) )
   ALLOCATE( fc(dfftp%nnr,cider_nbas,cider_nset,nspin) )
-  ALLOCATE( fc2(dfftp%nnr,cider_nbas,cider_nset,nspin) )
   ALLOCATE( dfc(dfftp%nnr,cider_nbas,cider_nset,nspin) )
   ALLOCATE( ylm(ngm,cider_nl) )
   ALLOCATE( cider_exp(dfftp%nnr,cider_nalpha,nspin) )
@@ -280,6 +274,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   DO is = 1, nspin
     !
     rhogsum(:) = fac*rhog_core(:) + rho%of_g(:,is) ! rhoz is transformed to updw above
+    !rhogsum(:) = rho%of_g(:,is) ! rhoz is transformed to updw above
     !
     CALL fft_gradient_g2r( dfftp, rhogsum, g, grho(1,1,is) )
     !
@@ -303,8 +298,6 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
       print *,l,ialpha,iset
       CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is), l, &
                             fc(:,:,iset,is), dfc(:,:,iset,is) )
-      !CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is)+1e-8, &
-      !                      fc2(:,:,ialpha,is), dfc(:,:,ialpha,is) )
     enddo
     do ifeat=1,cider_nfeat
       l = l_list(ifeat)
@@ -340,10 +333,12 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   v1x = v1x * (1 - cider_params(3))
   v2x = v2x * (1 - cider_params(3))
   v3x = v3x * (1 - cider_params(3))
+  !CALL xc_cider_x( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
+  !                    rho%kin_r/e2, feat, ex, &
+  !                    v1x, v2x, v3x, vfeat)
   CALL xc_cider_x_py( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
                       rho%kin_r/e2, feat, ex, &
                       v1x, v2x, v3x, vfeat, h )
-  !
   DO is=1,nspin
     !
     do ifeat=1,cider_nfeat
@@ -432,7 +427,6 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   DEALLOCATE( v1c, v2c, v3c )
   DEALLOCATE( bas, vbas, vexp, fc, dfc, ylm, cider_exp, const )
   DEALLOCATE( feat, dfeat, vfeat )
-  !
   !
   ALLOCATE( dh( dfftp%nnr ) )    
   !
@@ -1958,7 +1952,7 @@ SUBROUTINE get_cider_lpot_bas( vr, ylm, l, ibas, v )
   !
   CALL start_clock( 'get_cider_lpot_bas' )
   !
-  ALLOCATE(vg(ngm),psi(dfftp%nnr))
+  ALLOCATE(vg(ngm), psi(dfftp%nnr))
   !
   ! ... Transform the real-space de/dfeat(r) to de/dfeat(k)
   !
@@ -2119,7 +2113,10 @@ SUBROUTINE get_cider_alpha( length, rho, grho, kin, cider_consts, cider_exp )
   const1 = const1 * pi / 2**(2.0_DP/3)
   const2 = const2 * pi / 2**(2.0_DP/3)
 
-  cider_exp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
+  cider_exp = cider_consts(1) + const1 * (ns*abs(rho))**(2.0_DP/3) &
+              + const2 * abs(kin) / (abs(rho)+1e-16)
+
+  print *, "CIDER EXP MAX", MAXVAL(cider_exp)
 
   do i=1,length
     if (cider_exp(i) < cider_consts(4)) then
@@ -2162,7 +2159,8 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
   const2 = const2 * pi / 2**(2.0_DP/3)
 
   allocate(cider_tmp(length))
-  cider_tmp = cider_consts(1) + const1 * (ns*rho)**(2.0_DP/3) + const2 * kin / rho
+  cider_tmp = cider_consts(1) + const1 * (ns*abs(rho))**(2.0_DP/3) &
+              + const2 * abs(kin) / (abs(rho)+1e-16)
 
   do i=1,length
     if (cider_tmp(i) < cider_consts(4)) then
@@ -2171,11 +2169,11 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
   enddo
 
   v1x = v1x + 2.0_DP/3.0_DP * DBLE(ns) * vexp &
-              * const1 / (ns*abs(rho)+1e-8)**(1.0_DP/3)
-  v1x = v1x - vexp * const2 * kin / (abs(rho)+1e-8)**2
-  v3x = v3x + vexp * const2 / (abs(rho)+1e-8)
+              * const1 / (ns*abs(rho)**(1.0_DP/3)+1e-16)
+  v1x = v1x - vexp * const2 * abs(kin) / (abs(rho)**2+1e-16)
+  v3x = v3x + vexp * const2 / (abs(rho)+1e-16)
 
-  DEALLOCATE(cider_tmp)
+  deallocate(cider_tmp)
 
   return
 END SUBROUTINE get_cider_lpot_exp
@@ -2214,10 +2212,8 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
                      py_v1x, py_v2x, py_v3x, py_vfeat, py_h
 
     ierror = forpy_initialize()
-    print *, "init", ierror
 
     ierror = ndarray_create(py_rho, rho)
-    print *, "numpy", ierror
     ierror = ndarray_create(py_grho, grho)
     ierror = ndarray_create(py_tau, tau)
     ierror = ndarray_create(py_feat, feat)
@@ -2240,10 +2236,8 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
     ierror = args%setitem(8, py_vfeat)
     ierror = args%setitem(9, cider_params(3))
     ierror = args%setitem(10, py_h)
-    print *, "args", ierror
 
     ierror = call_py_noret(cider_py_obj, "get_xc_fortran", args)
-    print *, "call", ierror
 
     call py_rho%destroy
     call py_grho%destroy
