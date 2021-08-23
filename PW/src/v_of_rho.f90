@@ -295,7 +295,6 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
     do iset=1,cider_nset
       l = cider_ls(iset)
       ialpha = ialphas(iset)
-      print *,l,ialpha,iset
       CALL get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is), l, &
                             fc(:,:,iset,is), dfc(:,:,iset,is) )
     enddo
@@ -2103,20 +2102,20 @@ SUBROUTINE get_cider_alpha( length, rho, grho, kin, cider_consts, cider_exp )
 
   real(dp) :: const1, const2, fac
   integer :: i
-  real(dp) :: ns
   integer :: tot
-  ns = DBLE(nspin)
 
   fac = cider_consts(3) * 1.2 * (6 * pi**2)**(2.0/3) / pi
   const1 = cider_consts(2) - fac
   const2 = fac / (0.3 * (3 * pi**2)**(2.0_DP/3))
-  const1 = const1 * pi / 2**(2.0_DP/3)
+  IF (nspin==1) THEN
+    const1 = const1 * pi / 2.0_DP**(2.0_DP/3)
+  ELSE
+    const1 = const1 * pi
+  ENDIF
   const2 = const2 * pi / 2**(2.0_DP/3)
 
-  cider_exp = cider_consts(1) + const1 * (ns*abs(rho))**(2.0_DP/3) &
+  cider_exp = cider_consts(1) + const1 * (abs(rho))**(2.0_DP/3) &
               + const2 * abs(kin) / (abs(rho)+1e-16)
-
-  print *, "CIDER EXP MAX", MAXVAL(cider_exp)
 
   do i=1,length
     if (cider_exp(i) < cider_consts(4)) then
@@ -2148,18 +2147,20 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
   real(dp) :: const1, const2, fac
   integer :: i
   real(dp), allocatable :: cider_tmp(:)
-  real(dp) :: ns
   integer :: tot
-  ns = DBLE(nspin)
 
   fac = cider_consts(3) * 1.2 * (6 * pi**2)**(2.0/3) / pi
   const1 = cider_consts(2) - fac
   const2 = fac / (0.3 * (3 * pi**2)**(2.0_DP/3))
-  const1 = const1 * pi / 2**(2.0_DP/3)
+  IF (nspin==1) THEN
+    const1 = const1 * pi / 2.0_DP**(2.0_DP/3)
+  ELSE
+    const1 = const1 * pi
+  ENDIF
   const2 = const2 * pi / 2**(2.0_DP/3)
 
   allocate(cider_tmp(length))
-  cider_tmp = cider_consts(1) + const1 * (ns*abs(rho))**(2.0_DP/3) &
+  cider_tmp = cider_consts(1) + const1 * (abs(rho))**(2.0_DP/3) &
               + const2 * abs(kin) / (abs(rho)+1e-16)
 
   do i=1,length
@@ -2168,8 +2169,8 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, grho, kin, cider_consts, &
     endif
   enddo
 
-  v1x = v1x + 2.0_DP/3.0_DP * DBLE(ns) * vexp &
-              * const1 / (ns*abs(rho)**(1.0_DP/3)+1e-16)
+  v1x = v1x + 2.0_DP/3.0_DP * vexp &
+              * const1 / (abs(rho)**(1.0_DP/3)+1e-16)
   v1x = v1x - vexp * const2 * abs(kin) / (abs(rho)**2+1e-16)
   v3x = v3x + vexp * const2 / (abs(rho)+1e-16)
 
