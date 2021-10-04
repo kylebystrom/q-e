@@ -165,12 +165,12 @@ MODULE input_parameters
         !! specify the directory containing the pseudopotentials
 
         CHARACTER(len=256) :: cider_param_dir = './'
-        ! specify the location of parameter files for custom model
+        ! specify the location of parameter files for CIDER model
 
         CHARACTER(len=256) :: cider_param_file = ' '
-        ! specify which file to use for parameters of custom model
+        ! specify which file to use for parameters of CIDER model
 
-        ! parameters for custom model, not to be included in the namelist
+        ! parameters for CIDER model, not to be included in the namelist
         INTEGER :: cider_nbas,cider_nfeat,cider_lmax,cider_nl,cider_nalpha,cider_nset
         REAL(DP), ALLOCATABLE :: cider_params(:)
         REAL(DP), ALLOCATABLE :: cider_consts(:,:)
@@ -408,6 +408,11 @@ MODULE input_parameters
         !! Variable used to overwrite dft definition contained in
         !! pseudopotential files; 'none' means DFT is read from pseudos.
         !! Used in PW only - allowed values: any legal DFT value
+        LOGICAL :: use_cider = .false.
+        !! Used to specify that the CIDER functional should be used.
+        !! If true, a fraction of a CIDER exchange functional,
+        !! as specified in the cider_param_file, will be replace 
+        !! said fraction of semi-local exchange in the input_dft functional.
 
         REAL(DP) :: starting_charge( nsx ) = 0.0_DP
         !! PW ONLY
@@ -681,7 +686,7 @@ MODULE input_parameters
              lgcscf, gcscf_ignore_mun, gcscf_mu, gcscf_conv_thr,              &
              gcscf_gk, gcscf_gh, gcscf_beta,                                  &
              space_group, uniqueb, origin_choice, rhombohedral,               &
-             zgate, relaxz, block, block_1, block_2, block_height
+             zgate, relaxz, block, block_1, block_2, block_height, use_cider
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters

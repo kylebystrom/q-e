@@ -103,8 +103,6 @@ CONTAINS
     ! ----------------------------------------------
     !
     SELECT CASE( TRIM(dftout) )
-    CASE('CUSTOM')
-       dft_defined = xclib_set_dft_IDs(-1,-1,0,0,5,0)
     ! special cases : PZ  (LDA is equivalent to PZ) 
     CASE( 'PZ', 'LDA' )
        dft_defined = xclib_set_dft_IDs(1,1,0,0,0,0)

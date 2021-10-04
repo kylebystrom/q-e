@@ -230,7 +230,8 @@ SUBROUTINE iosys()
                                cider_params, cider_nbas, cider_nfeat,          &
                                lm_list, l_list, a_list, cider_consts,          &
                                cider_lmax, cider_nl, cider_nalpha,             &
-                               cider_py_obj, cider_nset, cider_ls, ialphas, isets
+                               cider_py_obj, cider_nset, cider_ls,             &
+                               ialphas, isets
 
   !
   ! ... SYSTEM namelist
@@ -268,7 +269,7 @@ SUBROUTINE iosys()
                                esm_bc, esm_efield, esm_w, esm_nfit, esm_a,    &
                                lgcscf,                                        &
                                zgate, relaxz, block, block_1, block_2,        &
-                               block_height
+                               block_height, use_cider
   !
   ! ... ELECTRONS namelist
   !
@@ -324,6 +325,8 @@ SUBROUTINE iosys()
   USE qexsd_input,           ONLY : qexsd_input_obj
   USE qes_types_module,      ONLY : input_type
   !
+  USE dft_par_mod,           ONLY : ismeta
+  !
   IMPLICIT NONE
   !
   INTERFACE  
@@ -357,51 +360,6 @@ SUBROUTINE iosys()
   lecrpa_     = lecrpa  
   !
   lforce    = tprnfor
-  !
-  SELECT CASE( TRIM(input_dft) )
-  CASE( 'custom' )
-     write(*,*) "Reading in CIDER params"
-     cider_param_fname = TRIM(cider_param_dir) // TRIM(cider_param_file)
-     OPEN(unit=99, file=cider_param_fname, action='read')
-     ALLOCATE(cider_params(3))
-     READ(99,*) cider_nbas, cider_nset, cider_params
-     READ(99,*) cider_lmax, cider_nalpha
-     ALLOCATE ( cider_consts(4,cider_nalpha) )
-     ALLOCATE ( cider_ls(cider_nset) )
-     ALLOCATE ( ialphas(cider_nset) )
-     ALLOCATE ( cider_feat_inds(cider_nset) )
-     do ialpha=1,cider_nalpha
-        ! cider consts has shape (4,nalpha)
-        ! const a0 fac_mul amin
-        READ(99,*) cider_consts(1:4,ialpha)
-     enddo
-     cider_nl = (cider_lmax + 1) * (cider_lmax + 1)
-     cider_nfeat = 0
-     do iset=1,cider_nset
-        READ(99,*) cider_ls(iset), ialphas(iset)
-        cider_feat_inds(iset) = cider_nfeat + 1
-        cider_nfeat = cider_nfeat + 2 * cider_ls(iset) + 1
-     enddo
-     CLOSE(unit=99)
-     ALLOCATE( lm_list(cider_nfeat) )
-     ALLOCATE( l_list(cider_nfeat) )
-     ALLOCATE( a_list(cider_nfeat) )
-     ALLOCATE( isets(cider_nfeat) )
-     do iset=1,cider_nset
-        do mind=1,2*cider_ls(iset)+1
-          ind = cider_feat_inds(iset) + mind - 1
-          lm_list(ind) = cider_ls(iset) * cider_ls(iset) + mind
-          l_list(ind) = cider_ls(iset)
-          a_list(ind) = ialphas(iset)
-          isets(ind) = iset
-        enddo
-     enddo
-     ierror = forpy_initialize()
-     print *,"Init Python",ierror
-     ierror = import_py(ciderpy, "mldftdat.dft.qe_interface")
-     print *,"Load cider",ierror
-     ierror = call_py(cider_py_obj, ciderpy, "init_pyfort")
-  END SELECT
   !
   SELECT CASE( trim( calculation ) )
   CASE( 'scf' )
@@ -1608,6 +1566,51 @@ SUBROUTINE iosys()
   !
   CALL readpp ( input_dft, .FALSE., ecutwfc_pp, ecutrho_pp )
   CALL set_cutoff ( ecutwfc, ecutrho, ecutwfc_pp, ecutrho_pp )
+  !
+  IF (use_cider) THEN
+     write(*,*) "Reading in CIDER params"
+     cider_param_fname = TRIM(cider_param_dir) // TRIM(cider_param_file)
+     OPEN(unit=99, file=cider_param_fname, action='read')
+     ALLOCATE(cider_params(3))
+     READ(99,*) cider_nbas, cider_nset, cider_params
+     READ(99,*) cider_lmax, cider_nalpha
+     ALLOCATE ( cider_consts(4,cider_nalpha) )
+     ALLOCATE ( cider_ls(cider_nset) )
+     ALLOCATE ( ialphas(cider_nset) )
+     ALLOCATE ( cider_feat_inds(cider_nset) )
+     do ialpha=1,cider_nalpha
+        ! cider consts has shape (4,nalpha)
+        ! const a0 fac_mul amin
+        READ(99,*) cider_consts(1:4,ialpha)
+     enddo
+     cider_nl = (cider_lmax + 1) * (cider_lmax + 1)
+     cider_nfeat = 0
+     do iset=1,cider_nset
+        READ(99,*) cider_ls(iset), ialphas(iset)
+        cider_feat_inds(iset) = cider_nfeat + 1
+        cider_nfeat = cider_nfeat + 2 * cider_ls(iset) + 1
+     enddo
+     CLOSE(unit=99)
+     ALLOCATE( lm_list(cider_nfeat) )
+     ALLOCATE( l_list(cider_nfeat) )
+     ALLOCATE( a_list(cider_nfeat) )
+     ALLOCATE( isets(cider_nfeat) )
+     do iset=1,cider_nset
+        do mind=1,2*cider_ls(iset)+1
+          ind = cider_feat_inds(iset) + mind - 1
+          lm_list(ind) = cider_ls(iset) * cider_ls(iset) + mind
+          l_list(ind) = cider_ls(iset)
+          a_list(ind) = ialphas(iset)
+          isets(ind) = iset
+        enddo
+     enddo
+     ierror = forpy_initialize()
+     print *,"Init Python",ierror
+     ierror = import_py(ciderpy, "mldftdat.dft.qe_interface")
+     print *,"Load cider",ierror
+     ierror = call_py(cider_py_obj, ciderpy, "init_pyfort")
+     ismeta = .true.
+  ENDIF
   !
   ! ... ensure that smooth and dense grid coincide when ecutrho=4*ecutwfc
   ! ... even when the dense grid is set from input and the smooth grid is not

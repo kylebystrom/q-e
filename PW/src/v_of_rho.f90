@@ -21,6 +21,7 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   USE ions_base,        ONLY : nat, tau
   USE ldaU,             ONLY : lda_plus_u, lda_plus_u_kind, ldmx_b, &
                                nsg, v_nsg 
+  USE input_parameters, ONLY : use_cider
   USE xc_lib,           ONLY : xclib_dft_is
   USE dft_mod,          ONLY : xclib_get_id
   USE scf,              ONLY : scf_type
@@ -66,9 +67,10 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   !
   ! ... calculate exchange-correlation potential
   !
-  IF (xclib_get_id('LDA', 'EXCH') == -1) then
-     print *,"Calling v_xc_cider"
-     CALL v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
+  IF (use_cider) then
+     print *, "ISMETA", xclib_dft_is('meta')
+     CALL v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r, &
+                      .true. ) !xclib_dft_is('meta') )
   ELSEIF (xclib_dft_is('meta')) then
      CALL v_xc_meta( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
   ELSE
@@ -151,9 +153,9 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
 END SUBROUTINE v_of_rho
 !
 !
-!----------------------------------------------------------------------------
-SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
-  !--------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur, is_meta)
+  !-------------------------------------------------------------------------------
   !! Non-local XC potential using CIDER descriptors
   !
   USE kinds,            ONLY : DP
@@ -188,6 +190,7 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   !! integral V_xc * rho
   REAL(DP), INTENT(INOUT) :: etxc
   !! E_xc energy
+  LOGICAL, INTENT(IN) :: is_meta
   !
   ! ... local variables
   !
@@ -326,8 +329,12 @@ SUBROUTINE v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur)
   DEALLOCATE(rhogsum)
   !
   ! TODO problems for nspin>2
-  CALL xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
+  IF (is_meta) THEN
+    CALL xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
                      v1x, v2x, v3x, v1c, v2c, v3c )
+  ELSE
+    CALL gcxc( dfftp%nnr, )
+  ENDIF
   ex = ex * (1 - cider_params(3))
   v1x = v1x * (1 - cider_params(3))
   v2x = v2x * (1 - cider_params(3))
