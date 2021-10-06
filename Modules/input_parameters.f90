@@ -171,7 +171,8 @@ MODULE input_parameters
         ! specify which file to use for parameters of CIDER model
 
         ! parameters for CIDER model, not to be included in the namelist
-        INTEGER :: cider_nbas,cider_nfeat,cider_lmax,cider_nl,cider_nalpha,cider_nset,cider_uses_grad,ialpha_grad
+        INTEGER :: cider_nbas,cider_nfeat,cider_lmax,cider_nl,cider_nalpha,cider_nset,ialpha_grad
+        LOGICAL :: cider_uses_grad
         REAL(DP), ALLOCATABLE :: cider_params(:)
         REAL(DP), ALLOCATABLE :: cider_consts(:,:)
         INTEGER,  ALLOCATABLE :: lm_list(:), l_list(:), a_list(:), &
