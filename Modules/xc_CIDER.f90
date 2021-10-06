@@ -205,9 +205,8 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     !
     use kinds,              only : dp
     use constants,          only : e2, eps8, pi
-    use input_parameters,   only : cider_consts, cider_nalpha, cider_nfeat, &
-                                   cider_nbas, a_list, cider_params, &
-                                   cider_nset, cider_ls, ialphas, isets
+    use input_parameters,   only : cider_consts, cider_nalpha, &
+                                   cider_nbas, cider_params
     use io_global,          only : stdout
     use fft_base,           only : dfftp
     use gvect,              only : g, gg, ngm
@@ -259,11 +258,10 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     real(dp), allocatable :: vexp(:,:,:)  ! nnr, nalpha, nspin
     real(dp), allocatable :: fc(:,:,:,:)  ! nnr, nbas, napha, nspin
     real(dp), allocatable :: dfc(:,:,:,:) ! nnr, nbas, napha, nspin
-    real(dp), allocatable :: wqrho(:,:,:) ! nnr, nbas, nspin
     ! nalpha should be 4: 3 for l=0 scales and 1 for core damper
     ! nfeat should be 3 or 6, depending on how l=1 feat is stored, 6 probably better
     ! nbas should be for 1 set of exponents??? TODO
-    integer :: ibas, ibas1, ibas2
+    integer :: ibas, ibas1, ibas2, cider_nfeat0, cider_nfeat, ialpa
     !
     ! initialize timer and meta-gga stuff
     !
@@ -288,15 +286,31 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     !
     ! initialize CIDER components
     !
+    cider_nfeat0 = cider_nalpha - 1
+    if (cider_uses_grad) then
+        cider_nfeat = cider_nfeat0 + 3
+    else
+        cider_nfeat = cider_nfeat0
+    endif
+    !
+    allocate( cider_exp(dfftp%nnr,cider_nalpha,nspin) )
+    allocate( bas(dfftp%nnr,cider_nbas,nspin) )
+    allocate( gbas(dfftp%nnr,cider_nbas,nspin) )
+    allocate( dbas(dfftp%nnr,3,cider_nbas,nspin) )
+    allocate( vbas(dfftp%nnr,cider_nbas,nspin) )
+    allocate( vdbas(dfftp%nnr,3,cider_nbas,nspin) )
+    !
     allocate( feat(dfftp%nnr,cider_nfeat,nspin) )
     allocate( dfeat(dfftp%nnr,cider_nfeat,nspin) )
+    allocate( vfeat(dfftp%nnr,cider_nfeat,nspin) )
+    allocate( vexp(dfftp%nnr,cider_nalpha,nspin) )
+    allocate(  fc(dfftp%nnr,cider_nbas,cider_nalpha,nspin) )
+    allocate( dfc(dfftp%nnr,cider_nbas,cider_nalpha,nspin) )
     !
     vexp(:,:,:) = zero
     vbas(:,:,:) = zero
     vfeat(:,:,:) = zero
     h(:,:,:) = zero
-    !
-    cider_nfeat0 = cider_nalpha - 1
     !
     if (nspin == 2) then
         call rhoz_or_updw( rho, 'both', '->updw' )
