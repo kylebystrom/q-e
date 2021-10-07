@@ -340,6 +340,7 @@ SUBROUTINE iosys()
   CHARACTER(LEN=256), EXTERNAL :: trimcheck
   CHARACTER(LEN=256):: dft_
   CHARACTER(LEN=256):: cider_param_fname
+  type(tuple):: args
   !
   INTEGER  :: ia, nt, tempunit, i, j
   LOGICAL  :: exst, parallelfs, domag, stop_on_error
@@ -1572,25 +1573,34 @@ SUBROUTINE iosys()
      cider_param_fname = TRIM(cider_param_dir) // TRIM(cider_param_file)
      OPEN(unit=99, file=cider_param_fname, action='read')
      ALLOCATE(cider_params(3))
-     ALLOCATE(cider_consts(4,cider_nalpha))
      write(*,*) "Reading in CIDER params1"
+     do ialpha=1,3
+        READ(99,*)
+     enddo
      READ(99,*) cider_nbas, cider_nalpha, ialpha_grad, cider_params
+     ALLOCATE(cider_consts(4,cider_nalpha))
      if (ialpha_grad < 1) then
         cider_uses_grad = .FALSE.
      endif
-     write(*,*) "Reading in CIDER params2"
+     write(*,*) "Reading in CIDER params2",cider_nbas, cider_nalpha,ialpha_grad,cider_params(1),cider_params(2),cider_params(3)
      READ(99,*) cider_consts(1:4,cider_nalpha)
+     cider_consts(1:4,cider_nalpha) = cider_consts(1:4,cider_nalpha)
      do ialpha=1,cider_nalpha-1
         READ(99,*) cider_consts(1,ialpha)
+        write(*,*) cider_consts(1,ialpha), cider_consts(1,cider_nalpha)
         cider_consts(1:4,ialpha) = cider_consts(1,ialpha) * cider_consts(1:4,cider_nalpha)
+        write(*,*)
      enddo
+     CLOSE(unit=99)
      write(*,*) "Reading in CIDER params3"
      ierror = forpy_initialize()
-     print *,"Init Python",ierror
+     write(*,*) "Init Python",ierror
      ierror = import_py(ciderpy, "mldftdat.dft.qe_interface")
-     print *,"Load cider",ierror
-     ierror = call_py(cider_py_obj, ciderpy, "init_pyfort")
-     write(*,*) "Reading in CIDER params4"
+     write(*,*) "Load cider",ierror
+     ierror = tuple_create(args,1)
+     ierror = args%setitem(0, cider_param_fname)
+     ierror = call_py(cider_py_obj, ciderpy, "init_pyfort", args)
+     write(*,*) "Reading in CIDER params4",ierror
   ENDIF
   !
   ! ... ensure that smooth and dense grid coincide when ecutrho=4*ecutwfc

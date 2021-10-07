@@ -1513,8 +1513,7 @@ subroutine add_cider_gbas( rhog, feat, ibas1, ibas2)
     !
     ! ... local variables
     !
-    real(dp)                    :: fac 
-    real(dp)                    :: rgtot_re, rgtot_im
+    real(dp)                    :: fac
     integer                     :: ig
     real(dp)                    :: aexp
     !
@@ -1522,13 +1521,11 @@ subroutine add_cider_gbas( rhog, feat, ibas1, ibas2)
     !
     aexp = cider_params(1) / cider_params(2)**(ibas1-1) + cider_params(1) / cider_params(2)**(ibas2-1)
     !
-!$omp parallel do private( fac, rgtot_re, rgtot_im )
+!$omp parallel do private( fac )
     do ig = 1, ngm
         !
         fac = (pi/aexp)**1.5 * exp(-gg(ig) * tpiba2 / (4.D0 * aexp))
-        !rgtot_re = real(  rhog(ig) )
-        !rgtot_im = aimag( rhog(ig) )
-        feat(ig) = feat(ig) + fac * rhog(ig)
+        feat(ig) = feat(ig) + cmplx( fac * real(rhog(ig)), fac * aimag(rhog(ig)) )
         !
     enddo
 !$omp end parallel do
@@ -1802,10 +1799,12 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     !
     allocate( cider_exp(dfftp%nnr,cider_nalpha,nspin) )
     allocate( bas(dfftp%nnr,cider_nbas,nspin) )
-    allocate( gbas(dfftp%nnr,cider_nbas,nspin) )
-    allocate( dbas(dfftp%nnr,3,cider_nbas,nspin) )
+    allocate( gbas(ngm,cider_nbas,nspin) )
     allocate( vbas(dfftp%nnr,cider_nbas,nspin) )
-    allocate( vdbas(dfftp%nnr,3,cider_nbas,nspin) )
+    if (cider_uses_grad) then
+        allocate( dbas(dfftp%nnr,3,cider_nbas,nspin) )
+        allocate( vdbas(dfftp%nnr,3,cider_nbas,nspin) )
+    endif
     !
     allocate( feat(dfftp%nnr,cider_nfeat,nspin) )
     allocate( dfeat(dfftp%nnr,cider_nfeat,nspin) )
@@ -1817,9 +1816,11 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     allocate( psi(dfftp%nnr) )
     !
     vexp(:,:,:) = zero
+    gbas(:,:,:) = zero
     vbas(:,:,:) = zero
     vfeat(:,:,:) = zero
     h(:,:,:) = zero
+    l1c = sqrt(3/pi) * (8*pi/3)**(1.0_dp/3)
     !
     if (nspin == 2) then
         call rhoz_or_updw( rho, 'both', '->updw' )
@@ -1828,12 +1829,21 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     do is=1, nspin
         rhogsum(:) = fac*rhog_core(:) + rho%of_g(:,is) ! rhoz is transformed to updw above
         call fft_gradient_g2r(dfftp, rhogsum, g, grho(1,1,is))
+        ! get the CIDER exponents and coefficients, such that cider_exp contains a(r)
+        ! and df, dfc contain the coefficients c_ibas,ialpha(r)
+        ! TODO double check that alphas and coefs make sense
+        ! fc is equivalent to [ w_p^(1)(r), w_p^(2)(r), ..., wp^(n)(r), tilde(w)_q(r)]
         do ialpha=1,cider_nalpha
             call get_cider_alpha( dfftp%nnr, rho%of_r(:,is), rho%kin_r(:,is)/e2, &
                                   cider_consts(:,ialpha), cider_exp(:,ialpha,is) )
-            call get_cider_coefs( dfftp%nnr, cider_exp(:,ialpha,is), &
+            call get_cider_coefs( dfftp%nnr, 0.5_dp * cider_exp(:,ialpha,is), &
                                   fc(:,:,ialpha,is), dfc(:,:,ialpha,is) )
         enddo
+        dfc(:,:,:,is) = 0.5_dp * dfc(:,:,:,is)
+        ! Fourier transform the tilde{w}_q(r) * rho(r) into reciprocal space in psi,
+        ! then add the FFT'd function to gbas_p(r)
+        ! gbas(G,p,is) = sum_{q} C(p,q) exp(-G^2/4(p+q)) FFT(w_q * rho)(G)
+        ! TODO check that FFT is working as expected
         do ibas1=1,cider_nbas
             rhogsum(:) = zero
             psi = CMPLX(rho%of_r(:,is) * fc(:,ibas1,cider_nalpha,is),0.D0,kind=dp)
@@ -1844,22 +1854,25 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
             enddo
         enddo
         do ibas1=1,cider_nbas
+            ! transform gbas to realspace to get bas
+            ! bas then contains \int_r' ( \sum_q w_q(r') rho(r') f(p,q,r'-r) ) 
             call rho_g2r( dfftp, gbas(:,ibas1,is), bas(:,ibas1,is) )
             if ( cider_uses_grad ) then
+                ! TODO check fft grad for l=1 desc
+                ! TODO the math for this part is faulty, need to revise approach
                 call fft_gradient_g2r( dfftp, gbas(:,ibas1,is), dbas(:,:,ibas1,is) )
             endif
         enddo
-        const = cider_consts(2,ialpha)**1.5_dp
-        const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
         do ialpha=1,cider_nfeat0
+            const = cider_consts(2,ialpha)**1.5_dp
+            const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
             feat(:,ialpha,is)  = const * sum(  fc(:,:,ialpha,is) * bas(:,:,is), 2 )
             dfeat(:,ialpha,is) = const * sum( dfc(:,:,ialpha,is) * bas(:,:,is), 2 )
         enddo
-        l1c = sqrt(3/pi) * (8*pi/3)**(1.0_dp/3)
         if ( cider_uses_grad ) then
+            ialpha = ialpha_grad
             const = cider_consts(2,ialpha)**1.5_dp * l1c
             const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
-            ialpha = ialpha_grad
             do rindex=1,3
                 ifeat = cider_nfeat0 + rindex
                 feat(:,ifeat,is)  = const * sum(  fc(:,:,ialpha,is) * dbas(:,rindex,:,is), 2 )
@@ -1870,14 +1883,15 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     !
     ! ... call the semi-local DFT part and scale exchange by mixing factor, then call CIDER
     !
-    call xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
-                     v1x, v2x, v3x, v1c, v2c, v3c )
-    ex = ex * (1 - cider_params(3))
-    v1x = v1x * (1 - cider_params(3))
-    v2x = v2x * (1 - cider_params(3))
-    v3x = v3x * (1 - cider_params(3))
+    !call xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
+    !                 v1x, v2x, v3x, v1c, v2c, v3c )
+    !ex = ex * (1 - cider_params(3))
+    !v1x = v1x * (1 - cider_params(3))
+    !v2x = v2x * (1 - cider_params(3))
+    !v3x = v3x * (1 - cider_params(3))
     call xc_cider_x_py( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
-                        rho%kin_r/e2, feat, ex, v1x, v2x, v3x, vfeat, h )
+                        rho%kin_r/e2, feat, ex, v1x, v2x, v3x, vfeat, h, &
+                        ec, v1c, v2c, v3c )
     !
     ! ... backpropagate nonlocal functional derivatives
     !
@@ -1885,20 +1899,20 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         !
         ! ... contract vfeat into vexp and vbas, vdbas
         !
-        const = cider_consts(2,ialpha)**1.5_dp
-        const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
         do ialpha=1,cider_nfeat0
+            const = cider_consts(2,ialpha)**1.5_dp
+            const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
             vexp(:,ialpha,is) = vexp(:,ialpha,is) + vfeat(:,ialpha,is) * dfeat(:,ialpha,is)
             do ibas=1,cider_nbas
                 vbas(:,ibas,is) = vbas(:,ibas,is) + vfeat(:,ialpha,is) * const * fc(:,ibas,ialpha,is)
             enddo
         enddo
         if (cider_uses_grad) then
+            ialpha = ialpha_grad
             const = cider_consts(2,ialpha)**1.5_dp * l1c
             const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
             do rindex=1,3
                 ifeat = cider_nfeat0 + rindex
-                ialpha = ialpha_grad
                 vexp(:,ialpha,is) = vexp(:,ialpha,is) + vfeat(:,ifeat,is) * dfeat(:,ifeat,is)
                 do ibas=1,cider_nbas
                     vdbas(:,rindex,ibas,is) = vdbas(:,rindex,ibas,is) + vfeat(:,ifeat,is) * const * fc(:,ibas,ialpha,is)
@@ -1921,13 +1935,13 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
                 call add_cider_gbas( rhogsum, gbas(:,ibas2,is), ibas1, ibas2 )
             enddo
         enddo
-        bas(:,:,:) = zero
+        !bas(:,:,:) = zero
         do ibas1=1,cider_nbas
             vbas_tmp(:) = zero
             ! psi = rho%of_r(:,is) * fc(:,ibas1,nalpha,is)
             call rho_g2r( dfftp, gbas(:,ibas1,is), vbas_tmp )
             vexp(:,cider_nalpha,is) = vexp(:,cider_nalpha,is) + vbas_tmp * rho%of_r(:,is) * dfc(:,ibas1,cider_nalpha,is)
-            v1x(:,is) = v1x(:,is) + vbas_tmp * fc(:,ibas1,cider_nalpha,is)
+            !!! TODO v1x(:,is) = v1x(:,is) + vbas_tmp * fc(:,ibas1,cider_nalpha,is)
         enddo
         !
         ! ... Finally, now that all exponent constribs are computed, we need to 
@@ -1995,7 +2009,10 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
     DEALLOCATE( v1x, v2x, v3x )
     DEALLOCATE( v1c, v2c, v3c )
     ! TODO fix deallocation statements for new version
-    DEALLOCATE( cider_exp, bas, gbas, dbas, vbas, vdbas)
+    DEALLOCATE( cider_exp, bas, gbas, vbas )
+    if (cider_uses_grad) then
+      DEALLOCATE( dbas, vdbas )
+    endif
     DEALLOCATE( feat, dfeat, vfeat, vexp, fc, dfc, vbas_tmp )
     DEALLOCATE( psi )
     !
@@ -2046,7 +2063,8 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
 end subroutine v_xc_cider
 !
 SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
-                         feat, ex, v1x, v2x, v3x, vfeat, h )
+                         feat, ex, v1x, v2x, v3x, vfeat, h, &
+                         ec, v1c, v2c, v3c )
     !
     USE forpy_mod
     !
@@ -2069,6 +2087,10 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
     real(dp), intent(inout):: v3x(length,ns)
     real(dp), intent(out) :: vfeat(length,nfeat,ns)
     real(dp), intent(out) :: h(3,length,ns)
+    real(dp), intent(inout) :: ec(length)
+    real(dp), intent(inout) :: v1c(length,ns)
+    real(dp), intent(inout) :: v2c(np,length,ns)
+    real(dp), intent(inout) :: v3c(length,ns)
     !
     integer :: is,k,sgn,ierror
     real(dp) :: x43,x13
@@ -2076,7 +2098,8 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
 
     type(tuple) :: args
     type(ndarray) :: py_rho, py_grho, py_tau, py_feat, py_ex, &
-                     py_v1x, py_v2x, py_v3x, py_vfeat, py_h
+                     py_v1x, py_v2x, py_v3x, py_vfeat, py_h, &
+                     py_ec, py_v1c, py_v2c, py_v3c
 
     ierror = forpy_initialize()
 
@@ -2090,8 +2113,12 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
     ierror = ndarray_create_nocopy(py_v3x, v3x)
     ierror = ndarray_create_nocopy(py_vfeat, vfeat)
     ierror = ndarray_create_nocopy(py_h, h)
+    ierror = ndarray_create_nocopy(py_ec, ec)
+    ierror = ndarray_create_nocopy(py_v1c, v1c)
+    ierror = ndarray_create_nocopy(py_v2c, v2c)
+    ierror = ndarray_create_nocopy(py_v3c, v3c)
 
-    ierror = tuple_create(args,11)
+    ierror = tuple_create(args,15)
     ierror = args%setitem(0, py_rho)
     ierror = args%setitem(1, py_grho)
     ierror = args%setitem(2, py_tau)
@@ -2103,6 +2130,10 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
     ierror = args%setitem(8, py_vfeat)
     ierror = args%setitem(9, cider_params(3))
     ierror = args%setitem(10, py_h)
+    ierror = args%setitem(11, py_ec)
+    ierror = args%setitem(12, py_v1c)
+    ierror = args%setitem(13, py_v2c)
+    ierror = args%setitem(14, py_v3c)
 
     ierror = call_py_noret(cider_py_obj, "get_xc_fortran", args)
 
@@ -2116,6 +2147,10 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
     call py_v3x%destroy
     call py_vfeat%destroy
     call py_h%destroy
+    call py_ec%destroy
+    call py_v1c%destroy
+    call py_v2c%destroy
+    call py_v3c%destroy
     !
     return
     !
