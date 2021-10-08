@@ -68,7 +68,6 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   ! ... calculate exchange-correlation potential
   !
   IF (use_cider) then
-     print *, "ISMETA", xclib_dft_is('meta')
      CALL v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r ) !xclib_dft_is('meta') )
   ELSEIF (xclib_dft_is('meta')) then
      CALL v_xc_meta( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
@@ -1831,7 +1830,6 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         call fft_gradient_g2r(dfftp, rhogsum, g, grho(1,1,is))
         ! get the CIDER exponents and coefficients, such that cider_exp contains a(r)
         ! and df, dfc contain the coefficients c_ibas,ialpha(r)
-        ! TODO double check that alphas and coefs make sense
         ! fc is equivalent to [ w_p^(1)(r), w_p^(2)(r), ..., wp^(n)(r), tilde(w)_q(r)]
         do ialpha=1,cider_nalpha
             call get_cider_alpha( dfftp%nnr, rho%of_r(:,is), rho%kin_r(:,is)/e2, &
@@ -1843,7 +1841,6 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         ! Fourier transform the tilde{w}_q(r) * rho(r) into reciprocal space in psi,
         ! then add the FFT'd function to gbas_p(r)
         ! gbas(G,p,is) = sum_{q} C(p,q) exp(-G^2/4(p+q)) FFT(w_q * rho)(G)
-        ! TODO check that FFT is working as expected
         do ibas1=1,cider_nbas
             rhogsum(:) = zero
             psi = CMPLX(rho%of_r(:,is) * fc(:,ibas1,cider_nalpha,is),0.D0,kind=dp)
@@ -1855,7 +1852,8 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         enddo
         do ibas1=1,cider_nbas
             ! transform gbas to realspace to get bas
-            ! bas then contains \int_r' ( \sum_q w_q(r') rho(r') f(p,q,r'-r) ) 
+            ! bas then contains \int_r' ( \sum_q w_q(r') rho(r') f(p,q,r'-r) )
+            bas(:,ibas1,is) = zero
             call rho_g2r( dfftp, gbas(:,ibas1,is), bas(:,ibas1,is) )
             if ( cider_uses_grad ) then
                 ! TODO check fft grad for l=1 desc
@@ -1864,15 +1862,15 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
             endif
         enddo
         do ialpha=1,cider_nfeat0
-            const = cider_consts(2,ialpha)**1.5_dp
-            const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
+            const = ( (cider_consts(2,ialpha) + cider_consts(2,cider_nalpha)) / 2 )**1.5_dp
+            const = const + cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
             feat(:,ialpha,is)  = const * sum(  fc(:,:,ialpha,is) * bas(:,:,is), 2 )
             dfeat(:,ialpha,is) = const * sum( dfc(:,:,ialpha,is) * bas(:,:,is), 2 )
         enddo
         if ( cider_uses_grad ) then
             ialpha = ialpha_grad
-            const = cider_consts(2,ialpha)**1.5_dp * l1c
-            const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
+            const = ( (cider_consts(2,ialpha) + cider_consts(2,cider_nalpha)) / 2 )**1.5_dp * l1c
+            const = const + cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
             do rindex=1,3
                 ifeat = cider_nfeat0 + rindex
                 feat(:,ifeat,is)  = const * sum(  fc(:,:,ialpha,is) * dbas(:,rindex,:,is), 2 )
@@ -1881,14 +1879,8 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         endif
     enddo
     !
-    ! ... call the semi-local DFT part and scale exchange by mixing factor, then call CIDER
+    ! ... Call the Python routine to get the semi-local and CIDER components
     !
-    !call xc_metagcx( dfftp%nnr, nspin, np, rho%of_r, grho, rho%kin_r/e2, ex, ec, &
-    !                 v1x, v2x, v3x, v1c, v2c, v3c )
-    !ex = ex * (1 - cider_params(3))
-    !v1x = v1x * (1 - cider_params(3))
-    !v2x = v2x * (1 - cider_params(3))
-    !v3x = v3x * (1 - cider_params(3))
     call xc_cider_x_py( dfftp%nnr, cider_nfeat, nspin, np, rho%of_r, grho, &
                         rho%kin_r/e2, feat, ex, v1x, v2x, v3x, vfeat, h, &
                         ec, v1c, v2c, v3c )
@@ -1900,8 +1892,8 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         ! ... contract vfeat into vexp and vbas, vdbas
         !
         do ialpha=1,cider_nfeat0
-            const = cider_consts(2,ialpha)**1.5_dp
-            const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
+            const = ( (cider_consts(2,ialpha) + cider_consts(2,cider_nalpha)) / 2 )**1.5_dp
+            const = const + cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
             vexp(:,ialpha,is) = vexp(:,ialpha,is) + vfeat(:,ialpha,is) * dfeat(:,ialpha,is)
             do ibas=1,cider_nbas
                 vbas(:,ibas,is) = vbas(:,ibas,is) + vfeat(:,ialpha,is) * const * fc(:,ibas,ialpha,is)
@@ -1909,8 +1901,8 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         enddo
         if (cider_uses_grad) then
             ialpha = ialpha_grad
-            const = cider_consts(2,ialpha)**1.5_dp * l1c
-            const = const * cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
+            const = ( (cider_consts(2,ialpha) + cider_consts(2,cider_nalpha)) / 2 )**1.5_dp * l1c
+            const = const + cider_consts(1,ialpha) / (cider_consts(1,ialpha) + const)
             do rindex=1,3
                 ifeat = cider_nfeat0 + rindex
                 vexp(:,ialpha,is) = vexp(:,ialpha,is) + vfeat(:,ifeat,is) * dfeat(:,ifeat,is)
@@ -1928,6 +1920,7 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
         ! transform rho back to deriv wrt xq
         gbas(:,:,:) = zero
         do ibas1=1,cider_nbas
+            rhogsum(:) = zero
             psi(:) = CMPLX(vbas(:,ibas1,is), 0.D0, kind=dp) ! wq * rho
             call fwfft( 'Rho', psi, dfftp )
             call fftx_threed2oned( dfftp, psi, rhogsum )
@@ -1941,7 +1934,7 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
             ! psi = rho%of_r(:,is) * fc(:,ibas1,nalpha,is)
             call rho_g2r( dfftp, gbas(:,ibas1,is), vbas_tmp )
             vexp(:,cider_nalpha,is) = vexp(:,cider_nalpha,is) + vbas_tmp * rho%of_r(:,is) * dfc(:,ibas1,cider_nalpha,is)
-            !!! TODO v1x(:,is) = v1x(:,is) + vbas_tmp * fc(:,ibas1,cider_nalpha,is)
+            v1x(:,is) = v1x(:,is) + vbas_tmp * fc(:,ibas1,cider_nalpha,is)
         enddo
         !
         ! ... Finally, now that all exponent constribs are computed, we need to 

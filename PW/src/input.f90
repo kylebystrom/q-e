@@ -1587,9 +1587,8 @@ SUBROUTINE iosys()
      cider_consts(1:4,cider_nalpha) = cider_consts(1:4,cider_nalpha)
      do ialpha=1,cider_nalpha-1
         READ(99,*) cider_consts(1,ialpha)
-        write(*,*) cider_consts(1,ialpha), cider_consts(1,cider_nalpha)
         cider_consts(1:4,ialpha) = cider_consts(1,ialpha) * cider_consts(1:4,cider_nalpha)
-        write(*,*)
+        write(*,*) cider_consts(1,ialpha), cider_consts(2,ialpha), cider_consts(3,ialpha), cider_consts(4,ialpha)
      enddo
      CLOSE(unit=99)
      write(*,*) "Reading in CIDER params3"
