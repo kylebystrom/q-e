@@ -1602,6 +1602,7 @@ SUBROUTINE get_cider_alpha( length, rho, kin, cider_consts, cider_exp )
   USE kind_l, ONLY : DP
   USE lsda_mod, ONLY : nspin
   USE constants, ONLY : pi
+  USE input_parameters, ONLY : cider_params
   IMPLICIT NONE
   
   integer,  intent(in) :: length
@@ -1625,12 +1626,13 @@ SUBROUTINE get_cider_alpha( length, rho, kin, cider_consts, cider_exp )
   const2 = const2 * pi / 2**(2.0_DP/3)
 
   cider_exp = cider_consts(1) + const1 * (abs(rho))**(2.0_DP/3) &
-              + const2 * abs(kin) / (abs(rho)+1e-16)
+              + const2 * abs(kin) / (abs(rho)+1e-8)
 
   do i=1,length
     if (cider_exp(i) < cider_consts(4)) then
       cider_exp(i) = cider_consts(4)*exp(cider_exp(i)/cider_consts(4)-1.0_DP)
     endif
+    cider_exp(i) = min(cider_exp(i), 2*cider_params(1))
   enddo
 
   return
@@ -1641,6 +1643,7 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, kin, cider_consts, &
   USE kind_l, ONLY : DP
   USE lsda_mod, ONLY : nspin
   USE constants, ONLY : pi
+  USE input_parameters, ONLY : cider_params
   IMPLICIT NONE
 
   integer,  intent(in) :: length
@@ -1670,18 +1673,21 @@ SUBROUTINE get_cider_lpot_exp ( length, rho, kin, cider_consts, &
 
   allocate(cider_tmp(length))
   cider_tmp = cider_consts(1) + const1 * (abs(rho))**(2.0_DP/3) &
-              + const2 * abs(kin) / (abs(rho)+1e-16)
+              + const2 * abs(kin) / (abs(rho)+1e-8)
 
   do i=1,length
     if (cider_tmp(i) < cider_consts(4)) then
       vexp(i) = vexp(i) / cider_consts(4) * cider_exp(i)
     endif
+    if (cider_tmp(i) > 2*cider_params(1)) then
+      vexp(i) = 0
+    endif
   enddo
 
   v1x = v1x + 2.0_DP/3.0_DP * vexp &
-              * const1 / (abs(rho)**(1.0_DP/3)+1e-16)
-  v1x = v1x - vexp * const2 * abs(kin) / (abs(rho)**2+1e-16)
-  v3x = v3x + vexp * const2 / (abs(rho)+1e-16)
+              * const1 / (abs(rho)**(1.0_DP/3)+1e-8)
+  v1x = v1x - vexp * const2 * abs(kin) / (abs(rho)**2+1e-8)
+  v3x = v3x + vexp * const2 / (abs(rho)+1e-8)
 
   deallocate(cider_tmp)
 
@@ -1836,6 +1842,7 @@ subroutine v_xc_cider( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
                                   cider_consts(:,ialpha), cider_exp(:,ialpha,is) )
             call get_cider_coefs( dfftp%nnr, 0.5_dp * cider_exp(:,ialpha,is), &
                                   fc(:,:,ialpha,is), dfc(:,:,ialpha,is) )
+            write(*,*) 'CIDER MAX', maxval(cider_exp(:,ialpha,is)), minval(cider_exp(:,ialpha,is))
         enddo
         dfc(:,:,:,is) = 0.5_dp * dfc(:,:,:,is)
         ! Fourier transform the tilde{w}_q(r) * rho(r) into reciprocal space in psi,
@@ -2094,7 +2101,7 @@ SUBROUTINE xc_cider_x_py(length, nfeat, ns, np, rho, grho, tau, &
                      py_v1x, py_v2x, py_v3x, py_vfeat, py_h, &
                      py_ec, py_v1c, py_v2c, py_v3c
 
-    ierror = forpy_initialize()
+    !ierror = forpy_initialize()
 
     ierror = ndarray_create(py_rho, rho)
     ierror = ndarray_create(py_grho, grho)
