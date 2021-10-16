@@ -151,7 +151,7 @@ all : libqemod.a
 ## The following is needed only for lapack compiled from sources
 
 forpy_mod.o:
-	$(MPIF90) $(F90FLAGS) -c forpy_mod.F90 -lpython3.7m
+	$(MPIF90) $(F90FLAGS) -c forpy_mod.F90 $(LDFLAGS)
 
 dlamch.o : dlamch.f
 	$(F77) $(FFLAGS_NOOPT) -c $<
